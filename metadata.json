@@ -1,0 +1,6 @@
+{
+  "name": "Open AULA - Web Driver & Configurator",
+  "description": "Trình điều khiển và cấu hình WebHID mã nguồn mở cho bàn phím & chuột AULA (S75 Pro, F75, F87 Pro, SC620). Tùy chỉnh đèn LED RGB, gán phím, macro, màn hình TFT/OLED GIF, DPI và thử nghiệm switch phím cơ.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

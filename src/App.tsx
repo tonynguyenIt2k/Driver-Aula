@@ -1,0 +1,981 @@
+import React, { useState, useEffect } from 'react';
+import confetti from 'canvas-confetti';
+import {
+  Keyboard as KeyboardIcon,
+  Sparkles,
+  Layers,
+  Tv,
+  Mouse as MouseIcon,
+  Terminal,
+  Activity,
+  CheckCircle2,
+  Usb,
+  ExternalLink,
+  Search,
+  X,
+  AlertTriangle,
+  Settings,
+} from 'lucide-react';
+
+import {
+  DeviceModel,
+  KeyDefinition,
+  LightingConfig,
+  KeyRemapAction,
+  Macro,
+  MouseConfig,
+  ScreenConfig,
+  SystemSettings,
+  Language,
+  SwitchSoundType,
+  HIDPacket,
+} from './types/device';
+
+import {
+  SUPPORTED_DEVICES,
+  DEFAULT_MOUSE_CONFIG,
+} from './data/devices';
+
+import { TRANSLATIONS } from './data/translations';
+import { webhidService, ConnectedDeviceInfo } from './services/webhid';
+import { soundEngine } from './services/soundEngine';
+
+import { Header } from './components/Header';
+import { KeyboardVisualizer } from './components/KeyboardVisualizer';
+import { MouseVisualizer } from './components/MouseVisualizer';
+import { KeymapTab } from './components/KeymapTab';
+import { LightingTab } from './components/LightingTab';
+import { MacroTab } from './components/MacroTab';
+import { ScreenTab } from './components/ScreenTab';
+import { MouseTab } from './components/MouseTab';
+import { KeyTesterTab } from './components/KeyTesterTab';
+import { PacketLogTab } from './components/PacketLogTab';
+import { SystemTab } from './components/SystemTab';
+
+const INITIAL_MACROS: Macro[] = [
+  {
+    id: 'm1',
+    name: 'CS2 / Valorant Fast Drop',
+    repeatMode: 'once',
+    createdAt: Date.now() - 50000,
+    actions: [
+      { id: '1', type: 'keydown', key: 'g', code: 'KeyG' },
+      { id: '2', type: 'delay', delayMs: 30 },
+      { id: '3', type: 'keyup', key: 'g', code: 'KeyG' },
+      { id: '4', type: 'delay', delayMs: 40 },
+      { id: '5', type: 'keydown', key: '3', code: 'Digit3' },
+      { id: '6', type: 'delay', delayMs: 25 },
+      { id: '7', type: 'keyup', key: '3', code: 'Digit3' },
+    ],
+  },
+  {
+    id: 'm2',
+    name: 'Dev: Git Push Origin Main',
+    repeatMode: 'once',
+    createdAt: Date.now() - 40000,
+    actions: [
+      { id: '1', type: 'keydown', key: 'g', code: 'KeyG' },
+      { id: '2', type: 'keyup', key: 'g', code: 'KeyG' },
+      { id: '3', type: 'keydown', key: 'i', code: 'KeyI' },
+      { id: '4', type: 'keyup', key: 'i', code: 'KeyI' },
+      { id: '5', type: 'keydown', key: 't', code: 'KeyT' },
+      { id: '6', type: 'keyup', key: 't', code: 'KeyT' },
+      { id: '7', type: 'delay', delayMs: 50 },
+      { id: '8', type: 'keydown', key: 'p', code: 'KeyP' },
+      { id: '9', type: 'keyup', key: 'p', code: 'KeyP' },
+    ],
+  },
+];
+
+const EMPTY_KEYMAPS = (): Record<number, Record<string, KeyRemapAction>> => ({
+  0: {},
+  1: {},
+  2: {},
+  3: {},
+});
+
+const getKeymapStorageKey = (deviceId: string, profile: number) =>
+  `open-aula:keymaps:${deviceId}:p${profile}`;
+
+const loadSavedKeymaps = (
+  deviceId: string,
+  profile: number
+): Record<number, Record<string, KeyRemapAction>> => {
+  try {
+    const raw = localStorage.getItem(getKeymapStorageKey(deviceId, profile));
+    if (!raw) return EMPTY_KEYMAPS();
+    const parsed = JSON.parse(raw);
+    return {
+      0: parsed?.[0] && typeof parsed[0] === 'object' ? parsed[0] : {},
+      1: parsed?.[1] && typeof parsed[1] === 'object' ? parsed[1] : {},
+      2: parsed?.[2] && typeof parsed[2] === 'object' ? parsed[2] : {},
+      3: parsed?.[3] && typeof parsed[3] === 'object' ? parsed[3] : {},
+    };
+  } catch {
+    return EMPTY_KEYMAPS();
+  }
+};
+
+const loadSavedMacros = (): Macro[] => {
+  try {
+    const raw = localStorage.getItem('open-aula:macros');
+    if (!raw) return INITIAL_MACROS;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : INITIAL_MACROS;
+  } catch {
+    return INITIAL_MACROS;
+  }
+};
+
+export default function App() {
+  const [lang, setLang] = useState<Language>('vi');
+  const t = (key: string) => TRANSLATIONS[lang][key] || key;
+
+  // Selected device
+  const [selectedDevice, setSelectedDevice] = useState<DeviceModel>(SUPPORTED_DEVICES[0]);
+  const [activeTab, setActiveTab] = useState<
+    'keymap' | 'lighting' | 'macro' | 'screen' | 'mouse' | 'tester' | 'system' | 'packets'
+  >('keymap');
+
+  // Connection & WebHID state (real hardware only)
+  const [isConnected, setIsConnected] = useState<boolean>(webhidService.isConnected());
+  const [deviceInfo, setDeviceInfo] = useState<ConnectedDeviceInfo>(webhidService.getDeviceInfo());
+  const [packets, setPackets] = useState<HIDPacket[]>(webhidService.getPackets());
+
+  // Profile
+  const [activeProfile, setActiveProfile] = useState<number>(1);
+
+  // Keyboard configurations (persisted per device + profile in localStorage)
+  const [lighting, setLighting] = useState<LightingConfig>(selectedDevice.defaultLighting);
+  const [activeLayer, setActiveLayer] = useState<number>(0);
+  const activeKeymapStorageKey = getKeymapStorageKey(selectedDevice.id, activeProfile);
+  const [keymapStore, setKeymapStore] = useState<{
+    key: string;
+    map: Record<number, Record<string, KeyRemapAction>>;
+  }>(() => ({
+    key: getKeymapStorageKey(SUPPORTED_DEVICES[0].id, 1),
+    map: loadSavedKeymaps(SUPPORTED_DEVICES[0].id, 1),
+  }));
+  const keymaps =
+    keymapStore.key === activeKeymapStorageKey
+      ? keymapStore.map
+      : loadSavedKeymaps(selectedDevice.id, activeProfile);
+  const setKeymaps = (
+    updater:
+      | Record<number, Record<string, KeyRemapAction>>
+      | ((
+          prev: Record<number, Record<string, KeyRemapAction>>
+        ) => Record<number, Record<string, KeyRemapAction>>)
+  ) => {
+    setKeymapStore((prev) => {
+      const base =
+        prev.key === activeKeymapStorageKey
+          ? prev.map
+          : loadSavedKeymaps(selectedDevice.id, activeProfile);
+      const nextMap = typeof updater === 'function' ? updater(base) : updater;
+      try {
+        localStorage.setItem(activeKeymapStorageKey, JSON.stringify(nextMap));
+      } catch {
+        // Ignore storage quota errors
+      }
+      return { key: activeKeymapStorageKey, map: nextMap };
+    });
+  };
+  const [selectedKey, setSelectedKey] = useState<KeyDefinition | null>(null);
+
+  // Screen config (S75 Pro)
+  const [screenConfig, setScreenConfig] = useState<ScreenConfig>({
+    brightness: 90,
+    fps: 25,
+    currentGifUrl:
+      'https://images.unsplash.com/photo-1543852786-1cf6624b9987?w=320&auto=format&fit=crop&q=80',
+    orientation: 0,
+    showTimeOverlay: true,
+    showBatteryOverlay: true,
+    showTempOverlay: false,
+  });
+
+  // System Settings (S75 Pro)
+  const [systemSettings, setSystemSettings] = useState<SystemSettings>({
+    debounceLevel: 2,
+    sleepMinutes: 1,
+    disableWinKey: false,
+    disableAltF4: false,
+    disableAltTab: false,
+  });
+
+  // Mouse config (SC620)
+  const [mouseConfig, setMouseConfig] = useState<MouseConfig>(DEFAULT_MOUSE_CONFIG);
+  const [selectedMouseButton, setSelectedMouseButton] = useState<string | null>(null);
+
+  // Macros (persisted in localStorage)
+  const [macros, setMacros] = useState<Macro[]>(() => loadSavedMacros());
+
+  // Custom Per-Key Matrix Painter state
+  const [isCustomMatrixActive, setIsCustomMatrixActive] = useState<boolean>(false);
+  const [brushColor, setBrushColor] = useState<string>('#ef4444');
+
+  // Key Tester anti-ghosting state
+  const [activeKeys, setActiveKeys] = useState<Set<string>>(new Set());
+  const [testedKeys, setTestedKeys] = useState<Set<string>>(new Set());
+
+  // Toast feedback & WebHID connect assistant modal
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [pairedDevices, setPairedDevices] = useState<any[]>([]);
+  const [connectModal, setConnectModal] = useState<{
+    open: boolean;
+    errorType?: 'unsupported' | 'permissions_policy' | 'cancelled' | 'open_failed';
+    message?: string;
+  }>({ open: false });
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  const syncMatchedDeviceModel = (info: ConnectedDeviceInfo | null) => {
+    if (!info || info.connectionType === 'disconnected') return;
+    const name = (info.productName || '').toLowerCase();
+    let matched: DeviceModel | undefined;
+    if (info.openAulaModelId === 's75pro') {
+      matched = SUPPORTED_DEVICES.find((d) => d.id === 'aula-s75-pro');
+    } else if (info.openAulaModelId === 'f75') {
+      matched = SUPPORTED_DEVICES.find((d) => d.id === 'aula-f75');
+    } else if (info.openAulaModelId === 'f87pro') {
+      matched = SUPPORTED_DEVICES.find((d) => d.id === 'aula-f87-pro');
+    } else if (info.openAulaModelId === 'sc620') {
+      matched = SUPPORTED_DEVICES.find((d) => d.id === 'aula-sc620');
+    } else if (
+      name.includes('s75') ||
+      (info.vendorId === 0x0c45 && info.productId === 0x800a) ||
+      (info.vendorId === 0x05ac && info.productId === 0x024f)
+    ) {
+      matched = SUPPORTED_DEVICES.find((d) => d.id === 'aula-s75-pro');
+    } else if (name.includes('f75') || (info.vendorId === 0x258a && info.productId === 0x010c)) {
+      matched = SUPPORTED_DEVICES.find((d) => d.id === 'aula-f75');
+    } else if (name.includes('f87') || info.vendorId === 0x38a6) {
+      matched = SUPPORTED_DEVICES.find((d) => d.id === 'aula-f87-pro');
+    } else if (
+      name.includes('sc620') ||
+      name.includes('mouse') ||
+      info.vendorId === 0x24ae ||
+      info.vendorId === 0xa8a4 ||
+      info.vendorId === 0xa8a5
+    ) {
+      matched = SUPPORTED_DEVICES.find((d) => d.id === 'aula-sc620');
+    }
+
+    if (matched) {
+      setSelectedDevice(matched);
+      setLighting(matched.defaultLighting);
+      if (matched.type === 'mouse') {
+        setActiveTab('mouse');
+      }
+    }
+  };
+
+  // Subscribe to WebHID packets, status, and auto-detect already-paired devices ("Đã ghép nối")
+  useEffect(() => {
+    const unsubPackets = webhidService.subscribePackets(() => {
+      setPackets(webhidService.getPackets());
+    });
+    const unsubStatus = webhidService.subscribeStatus((connected, info) => {
+      setIsConnected(connected);
+      if (info) {
+        setDeviceInfo(info);
+        if (connected) {
+          syncMatchedDeviceModel(info);
+        }
+      }
+    });
+
+    webhidService.checkPairedDevices(true).then((list) => {
+      setPairedDevices(list);
+      if (webhidService.isConnected()) {
+        syncMatchedDeviceModel(webhidService.getDeviceInfo());
+        showToast(`Đã tự động kết nối thiết bị đã ghép nối: ${webhidService.getDeviceInfo().productName}`);
+      }
+    });
+
+    return () => {
+      unsubPackets();
+      unsubStatus();
+    };
+  }, []);
+
+  // Sync saved keymaps whenever device or profile changes
+  useEffect(() => {
+    setKeymapStore((prev) =>
+      prev.key === activeKeymapStorageKey
+        ? prev
+        : {
+            key: activeKeymapStorageKey,
+            map: loadSavedKeymaps(selectedDevice.id, activeProfile),
+          }
+    );
+  }, [activeKeymapStorageKey, selectedDevice.id, activeProfile]);
+
+  // Persist macros automatically
+  useEffect(() => {
+    try {
+      localStorage.setItem('open-aula:macros', JSON.stringify(macros));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [macros]);
+
+  // Listen to physical keyboard events for Switch Sounds & Key Tester
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger switch sounds if user is typing into text inputs
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        return;
+      }
+
+      soundEngine.playKeySound(false);
+
+      setActiveKeys((prev) => new Set([...prev, e.code]));
+      setTestedKeys((prev) => new Set([...prev, e.code]));
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        return;
+      }
+
+      soundEngine.playKeySound(true);
+
+      setActiveKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(e.code);
+        return next;
+      });
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
+
+  // Handle Device Change
+  const handleSelectDevice = (device: DeviceModel) => {
+    setSelectedDevice(device);
+    setLighting(device.defaultLighting);
+    setSelectedKey(null);
+    setSelectedMouseButton(null);
+
+    if (device.type === 'mouse') {
+      setActiveTab('mouse');
+    } else {
+      if (activeTab === 'mouse') {
+        setActiveTab('keymap');
+      }
+    }
+    showToast(`Đã chọn layout hiển thị: ${device.name}`);
+  };
+
+  // Connect Hardware WebHID
+  const handleConnectHID = async (allowAllDevices = false) => {
+    const res = await webhidService.connectHardware(allowAllDevices);
+    const paired = await webhidService.checkPairedDevices(false);
+    setPairedDevices(paired);
+
+    if (res.success) {
+      setConnectModal({ open: false });
+      if (res.deviceInfo) {
+        syncMatchedDeviceModel(res.deviceInfo);
+      }
+      confetti({
+        particleCount: 80,
+        spread: 60,
+        origin: { y: 0.1 },
+      });
+      showToast(res.message);
+    } else {
+      if (
+        res.errorType === 'permissions_policy' ||
+        res.errorType === 'unsupported' ||
+        res.errorType === 'open_failed' ||
+        (res.errorType === 'cancelled' && !allowAllDevices)
+      ) {
+        setConnectModal({
+          open: true,
+          errorType: res.errorType,
+          message: res.message,
+        });
+      }
+      showToast(res.message);
+    }
+  };
+
+  const handleConnectPaired = async (dev: any) => {
+    const res = await webhidService.connectPairedDevice(dev);
+    if (res.success) {
+      setConnectModal({ open: false });
+      if (res.deviceInfo) syncMatchedDeviceModel(res.deviceInfo);
+      confetti({ particleCount: 70, spread: 55, origin: { y: 0.1 } });
+      showToast(res.message);
+    } else {
+      showToast(res.message);
+    }
+  };
+
+  const handleDisconnectHID = () => {
+    webhidService.disconnect();
+    showToast('Đã ngắt kết nối phần cứng WebHID.');
+  };
+
+  // Key Remap Action (writes real HID scancode / full Aula04 576B keymap table over WebHID)
+  const handleRemapKey = async (action: KeyRemapAction | null, targetKey?: KeyDefinition) => {
+    const keyToEdit = targetKey ?? selectedKey;
+    if (!keyToEdit) return;
+
+    if (action) {
+      if (!webhidService.isConnected()) {
+        showToast('Chưa kết nối thiết bị WebHID thật! Hãy kết nối bàn phím trước khi gán phím.');
+        return;
+      }
+      const nextLayerMap = {
+        ...(keymaps[activeLayer] || {}),
+        [keyToEdit.id]: action,
+      };
+      const res = await webhidService.applyKeymap(
+        activeLayer,
+        keyToEdit.hwIdx ?? Math.round(keyToEdit.col),
+        action,
+        selectedDevice.keys || [],
+        nextLayerMap,
+        macros
+      );
+      if (!res.ok) {
+        showToast(res.message);
+        return;
+      }
+      setKeymaps((prev) => ({
+        ...prev,
+        [activeLayer]: nextLayerMap,
+      }));
+      showToast(`Đã ghi thật [${keyToEdit.label}] -> ${action.label}`);
+    } else {
+      const nextLayerMap = { ...(keymaps[activeLayer] || {}) };
+      delete nextLayerMap[keyToEdit.id];
+      if (webhidService.isConnected()) {
+        await webhidService.applyKeymap(
+          activeLayer,
+          keyToEdit.hwIdx ?? Math.round(keyToEdit.col),
+          { type: 'default', value: '', label: 'Default', category: 'Default' },
+          selectedDevice.keys || [],
+          nextLayerMap,
+          macros
+        );
+      }
+      setKeymaps((prev) => ({
+        ...prev,
+        [activeLayer]: nextLayerMap,
+      }));
+      showToast(`Đã khôi phục [${keyToEdit.label}] về mặc định`);
+    }
+  };
+
+  // Apply Lighting to Real Hardware
+  const handleApplyLighting = async () => {
+    if (!webhidService.isConnected()) {
+      showToast('Chưa kết nối thiết bị WebHID thật! Hãy kết nối bàn phím/chuột trước.');
+      return;
+    }
+    const res = await webhidService.applyLighting(lighting, selectedDevice.keys || []);
+    showToast(res.ok ? res.message || t('savedNotification') : res.message);
+  };
+
+  // Custom Matrix Painter Key Click & Group Paint
+  const handlePaintKey = (keyId: string, color: string) => {
+    setLighting((prev) => ({
+      ...prev,
+      mode: 'custom_matrix',
+      customKeyColors: {
+        ...prev.customKeyColors,
+        [keyId]: color,
+      },
+    }));
+  };
+
+  const handlePaintGroup = (keyIds: string[], color: string) => {
+    setLighting((prev) => {
+      const updated = { ...prev.customKeyColors };
+      for (const id of keyIds) {
+        updated[id] = color;
+      }
+      return {
+        ...prev,
+        mode: 'custom_matrix',
+        customKeyColors: updated,
+      };
+    });
+    showToast(`Đã tô màu ${keyIds.length} phím bằng màu ${color.toUpperCase()}`);
+  };
+
+  const handleClearCustomMatrix = () => {
+    setLighting((prev) => ({
+      ...prev,
+      customKeyColors: {},
+    }));
+    showToast('Đã xóa màu tùy biến tất cả các phím');
+  };
+
+  // Export / Import Profiles
+  const handleExportProfile = () => {
+    const data = {
+      version: '2.4.0',
+      device: selectedDevice.id,
+      profile: activeProfile,
+      lighting,
+      keymaps,
+      macros,
+      screenConfig,
+      mouseConfig,
+      systemSettings,
+    };
+    const jsonStr = JSON.stringify(data, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `open-aula-${selectedDevice.id}-profile-${activeProfile}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(t('exportProfile'));
+  };
+
+  const handleImportProfile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target?.result as string);
+        if (parsed.lighting) setLighting(parsed.lighting);
+        if (parsed.keymaps) setKeymaps(parsed.keymaps);
+        if (parsed.macros) setMacros(parsed.macros);
+        if (parsed.screenConfig) setScreenConfig(parsed.screenConfig);
+        if (parsed.mouseConfig) setMouseConfig(parsed.mouseConfig);
+        if (parsed.systemSettings) setSystemSettings(parsed.systemSettings);
+        showToast('Đã nhập thành công cấu hình!');
+      } catch (err) {
+        showToast('Tệp cấu hình không hợp lệ.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleFactoryReset = () => {
+    setLighting(selectedDevice.defaultLighting);
+    setKeymaps(EMPTY_KEYMAPS());
+    try {
+      localStorage.removeItem(getKeymapStorageKey(selectedDevice.id, activeProfile));
+    } catch {
+      // Ignore
+    }
+    setMacros(INITIAL_MACROS);
+    setMouseConfig(DEFAULT_MOUSE_CONFIG);
+    setSystemSettings({
+      debounceLevel: 2,
+      sleepMinutes: 1,
+      disableWinKey: false,
+      disableAltF4: false,
+      disableAltTab: false,
+    });
+    webhidService.clearPackets();
+    showToast('Đã khôi phục toàn bộ cài đặt gốc AULA!');
+  };
+
+  // Tabs navigation list
+  const navTabs = [
+    ...(selectedDevice.type === 'keyboard'
+      ? [
+          { id: 'keymap', name: t('tabKeymap'), icon: Layers },
+          { id: 'lighting', name: t('tabLighting'), icon: Sparkles },
+          { id: 'macro', name: t('tabMacro'), icon: Activity },
+          ...(selectedDevice.hasScreen
+            ? [{ id: 'screen', name: t('tabScreen'), icon: Tv }]
+            : []),
+          { id: 'tester', name: t('tabKeyTester'), icon: KeyboardIcon },
+          { id: 'system', name: t('tabSystem'), icon: Settings },
+        ]
+      : [
+          { id: 'mouse', name: t('tabMouse'), icon: MouseIcon },
+          { id: 'lighting', name: t('tabLighting'), icon: Sparkles },
+          { id: 'macro', name: t('tabMacro'), icon: Activity },
+        ]),
+    { id: 'packets', name: t('tabPackets'), icon: Terminal },
+  ];
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl bg-slate-900 border border-cyan-500/80 text-cyan-300 text-xs font-bold shadow-2xl shadow-cyan-500/20 animate-in fade-in slide-in-from-bottom-3">
+          <CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Header Bar */}
+      <Header
+        devices={SUPPORTED_DEVICES}
+        selectedDevice={selectedDevice}
+        onSelectDevice={handleSelectDevice}
+        isConnected={isConnected}
+        deviceInfo={deviceInfo}
+        activeProfile={activeProfile}
+        onSelectProfile={setActiveProfile}
+        lang={lang}
+        onToggleLang={() => setLang(lang === 'vi' ? 'en' : 'vi')}
+        t={t}
+        onConnectHID={() => handleConnectHID(false)}
+        onDisconnectHID={handleDisconnectHID}
+        onExportProfile={handleExportProfile}
+        onImportProfile={handleImportProfile}
+        onFactoryReset={handleFactoryReset}
+      />
+
+      {/* Real Hardware Status Banner */}
+      {!isConnected && pairedDevices.length > 0 ? (
+        <div className="bg-cyan-950/40 border-b border-cyan-800/50 px-4 py-2">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-cyan-200">
+              <Usb className="w-4 h-4 text-cyan-400" />
+              <span>
+                Phát hiện thiết bị đã ghép nối:{' '}
+                <strong className="text-white">
+                  {pairedDevices[0].productName || 'AULA HID Device'}
+                </strong>{' '}
+                <span className="text-emerald-400 font-semibold">• Đã ghép nối</span>
+              </span>
+            </div>
+            <button
+              onClick={() => handleConnectPaired(pairedDevices[0])}
+              className="px-3 py-1 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold transition cursor-pointer"
+            >
+              Kết nối lại ngay
+            </button>
+          </div>
+        </div>
+      ) : !isConnected ? (
+        <div className="bg-amber-950/30 border-b border-amber-800/40 px-4 py-2">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-amber-200">
+              <Usb className="w-4 h-4 text-amber-400" />
+              <span>
+                Chế độ phần cứng thật (không giả lập): Hãy cắm cáp USB-C hoặc đầu thu 2.4GHz và bấm{' '}
+                <strong>Kết nối thiết bị WebHID</strong> để điều khiển bàn phím/chuột thật.
+              </span>
+            </div>
+            <button
+              onClick={() => handleConnectHID(false)}
+              className="px-3 py-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold transition cursor-pointer"
+            >
+              Kết nối ngay
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* WebHID Connection Assistant Modal */}
+      {connectModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl flex flex-col gap-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-cyan-950 border border-cyan-700/60 flex items-center justify-center text-cyan-400">
+                  {connectModal.errorType === 'permissions_policy' ? (
+                    <AlertTriangle className="w-5 h-5 text-amber-400" />
+                  ) : (
+                    <Usb className="w-5 h-5" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-100">
+                    Kết nối thiết bị WebHID (AULA)
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Hỗ trợ Chrome / Edge / Brave / Opera trên máy tính
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setConnectModal({ open: false })}
+                className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {connectModal.message && (
+              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 leading-relaxed">
+                {connectModal.message}
+              </div>
+            )}
+
+            <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 text-xs text-slate-300 flex flex-col gap-1.5">
+              <div className="font-bold text-cyan-300">Lưu ý để dùng đầy đủ AULA-S75Pro (gồm cả nạp GIF màn hình TFT):</div>
+              <ul className="list-disc pl-4 space-y-1 text-slate-400">
+                <li>Cắm bàn phím qua cáp USB-C (nếu muốn nạp ảnh/GIF màn hình TFT 135×240) hoặc đầu thu 2.4GHz (LED, Keymap, Macro, Time Sync).</li>
+                <li>Trên Windows/macOS, Chrome có thể hiện nhiều dòng <strong className="text-slate-200">AULA-S75Pro</strong>: hãy cấp quyền cho tất cả các cổng cấu hình & màn hình (nếu thiếu cổng Screen, bấm nút <strong className="text-amber-300">Cấp quyền cổng Screen</strong> trong tab Màn hình TFT).</li>
+                <li>Tắt hẳn phần mềm AULA Driver gốc dưới khay hệ thống (nếu đang chạy nền) để không bị chiếm cổng HID.</li>
+              </ul>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2">
+              {connectModal.errorType === 'permissions_policy' && (
+                <a
+                  href={typeof window !== 'undefined' ? window.location.href : '#'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Mở trong Tab mới để kết nối WebHID</span>
+                </a>
+              )}
+
+              {connectModal.errorType !== 'permissions_policy' &&
+                connectModal.errorType !== 'unsupported' && (
+                  <button
+                    onClick={() => handleConnectHID(true)}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition cursor-pointer"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    <span>Quét tất cả thiết bị HID (Không lọc VID)</span>
+                  </button>
+                )}
+
+              <button
+                onClick={() => setConnectModal({ open: false })}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs transition cursor-pointer"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main Content Area: Left Workspace + Right Vertical Sidebar */}
+      <main className="flex-1 max-w-[1440px] w-full mx-auto p-4 md:p-6 flex flex-col lg:flex-row gap-6 items-start">
+        {/* Left Main Workspace */}
+        <div className="flex-1 min-w-0 w-full flex flex-col gap-6">
+          {/* Device Visualizer Stage */}
+          <section className="relative rounded-2xl border border-slate-800/90 bg-gradient-to-b from-slate-900/75 via-slate-950/90 to-slate-950 p-4 sm:p-6 md:p-7 shadow-2xl flex flex-col items-center gap-4 overflow-hidden">
+            <div className="w-full flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 border-b border-slate-800/70 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-100">{selectedDevice.name}</span>
+                <span aria-hidden="true">·</span>
+                <span>{selectedDevice.layoutName}</span>
+                <span aria-hidden="true">·</span>
+                <span>{selectedDevice.series}</span>
+              </div>
+              <div className="font-mono tabular-nums text-[11px] text-slate-400">
+                {selectedDevice.type === 'keyboard'
+                  ? `${t(`layer${activeLayer}`)} · Profile P${activeProfile}`
+                  : `Profile P${activeProfile}`}
+              </div>
+            </div>
+
+            {selectedDevice.type === 'keyboard' ? (
+              <KeyboardVisualizer
+                device={selectedDevice}
+                lighting={lighting}
+                screenConfig={screenConfig}
+                activeLayer={activeLayer}
+                keymaps={keymaps}
+                selectedKeyId={selectedKey?.id || null}
+                onSelectKey={(k) => setSelectedKey(k)}
+                isCustomMatrixActive={isCustomMatrixActive}
+                brushColor={brushColor}
+                onPaintKey={handlePaintKey}
+                externalActiveKeys={activeKeys}
+              />
+            ) : (
+              <MouseVisualizer
+                config={mouseConfig}
+                lighting={lighting}
+                selectedButtonId={selectedMouseButton}
+                onSelectButton={(btnId) => setSelectedMouseButton(btnId)}
+              />
+            )}
+          </section>
+
+          {/* Tab Content Panes */}
+          <div className="pb-12">
+            {activeTab === 'keymap' && selectedDevice.type === 'keyboard' && (
+              <KeymapTab
+                selectedKey={selectedKey}
+                deviceKeys={selectedDevice.keys || []}
+                layerKeymaps={keymaps[activeLayer] || {}}
+                onSelectKey={(k) => setSelectedKey(k)}
+                activeLayer={activeLayer}
+                onSelectLayer={setActiveLayer}
+                currentAction={selectedKey ? keymaps[activeLayer]?.[selectedKey.id] || null : null}
+                macros={macros}
+                onRemap={handleRemapKey}
+                lang={lang}
+                t={t}
+              />
+            )}
+
+            {activeTab === 'lighting' && (
+              <LightingTab
+                lighting={lighting}
+                deviceKeys={selectedDevice.keys}
+                onChangeLighting={setLighting}
+                onApplyLighting={handleApplyLighting}
+                isCustomMatrixActive={isCustomMatrixActive}
+                onToggleCustomMatrix={setIsCustomMatrixActive}
+                brushColor={brushColor}
+                onChangeBrushColor={setBrushColor}
+                onPaintGroup={handlePaintGroup}
+                onClearCustomMatrix={handleClearCustomMatrix}
+                lang={lang}
+                t={t}
+              />
+            )}
+
+            {activeTab === 'macro' && (
+              <MacroTab
+                macros={macros}
+                onUpdateMacros={setMacros}
+                onNotify={showToast}
+                lang={lang}
+                t={t}
+              />
+            )}
+
+            {activeTab === 'screen' && selectedDevice.hasScreen && (
+              <ScreenTab
+                config={screenConfig}
+                deviceInfo={deviceInfo}
+                isConnected={isConnected}
+                onRequestHIDConnect={() => handleConnectHID(false)}
+                onChangeConfig={setScreenConfig}
+                onNotify={showToast}
+                lang={lang}
+                t={t}
+              />
+            )}
+
+            {activeTab === 'mouse' && selectedDevice.type === 'mouse' && (
+              <MouseTab
+                config={mouseConfig}
+                onChangeConfig={setMouseConfig}
+                onNotify={showToast}
+                lang={lang}
+                t={t}
+              />
+            )}
+
+            {activeTab === 'tester' && (
+              <KeyTesterTab
+                activeKeys={activeKeys}
+                testedKeys={testedKeys}
+                onResetTester={() => setTestedKeys(new Set())}
+                lang={lang}
+                t={t}
+              />
+            )}
+
+            {activeTab === 'system' && selectedDevice.type === 'keyboard' && (
+              <SystemTab
+                settings={systemSettings}
+                onChangeSettings={setSystemSettings}
+                onFactoryResetLocal={handleFactoryReset}
+                onNotify={showToast}
+                lang={lang}
+              />
+            )}
+
+            {activeTab === 'packets' && (
+              <PacketLogTab
+                packets={packets}
+                deviceInfo={deviceInfo}
+                isConnected={isConnected}
+                onClearLog={() => webhidService.clearPackets()}
+                lang={lang}
+                t={t}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Right Vertical Sidebar */}
+        <aside className="w-full lg:w-64 shrink-0 lg:sticky lg:top-20 flex flex-col gap-4">
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 flex flex-col gap-2 shadow-xl">
+            <div className="px-2 pt-1 pb-1.5 text-[11px] font-semibold text-slate-400 border-b border-slate-800/80">
+              {lang === 'vi' ? 'Bảng điều khiển' : 'Workspace'}
+            </div>
+
+            <nav className="grid grid-cols-2 sm:grid-cols-4 lg:flex lg:flex-col gap-1">
+              {navTabs.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id as any)}
+                    className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold transition whitespace-nowrap cursor-pointer text-left ${
+                      isActive
+                        ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                        : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/70 border border-transparent'
+                    }`}
+                  >
+                    <Icon
+                      className={`w-4 h-4 shrink-0 ${
+                        isActive ? 'text-cyan-400' : 'text-slate-400'
+                      }`}
+                    />
+                    <span className="truncate">{tab.name}</span>
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+
+          {/* Quick Hardware & Layer Summary inside Sidebar (Desktop) */}
+          {selectedDevice.type === 'keyboard' && (
+            <div className="hidden lg:flex flex-col gap-3 bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-slate-300">
+                  {lang === 'vi' ? 'Layer nhanh' : 'Quick Layer'}
+                </span>
+                <span className="font-mono tabular-nums text-[11px] text-amber-300">
+                  {Object.keys(keymaps[activeLayer] || {}).length} {lang === 'vi' ? 'phím gán' : 'mapped'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {[0, 1, 2, 3].map((l) => (
+                  <button
+                    key={l}
+                    onClick={() => setActiveLayer(l)}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition cursor-pointer whitespace-nowrap truncate ${
+                      activeLayer === l
+                        ? 'bg-cyan-500 text-slate-950 font-bold'
+                        : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                    }`}
+                  >
+                    {t(`layer${l}`)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </aside>
+      </main>
+    </div>
+  );
+}
