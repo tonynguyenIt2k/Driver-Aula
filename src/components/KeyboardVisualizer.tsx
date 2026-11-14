@@ -17,10 +17,10 @@ interface KeyboardVisualizerProps {
   externalActiveKeys?: Set<string>;
 }
 
-const UNIT = 50; // px per 1u key width
-const ROW_H = 50; // px per 1u row height
-const GAP = 5; // px gap between keycaps
-const FROW_GAP = 7; // subtle physical separation between F-row and main cluster
+const BASE_UNIT = 50; // px per 1u key width (75% / TKL)
+const BASE_ROW_H = 50; // px per 1u row height
+const BASE_GAP = 5; // px gap between keycaps
+const BASE_FROW_GAP = 7; // subtle physical separation between F-row and main cluster
 
 export const KeyboardVisualizer: React.FC<KeyboardVisualizerProps> = ({
   device,
@@ -110,19 +110,19 @@ export const KeyboardVisualizer: React.FC<KeyboardVisualizerProps> = ({
       return lighting.primaryColor;
     }
     if (lighting.mode === 'rainbow_wave' || lighting.mode === 'fountain' || lighting.mode === 'revolving') {
-      const hue = (key.col * 22 + key.row * 28) % 360;
+      const hue = (key.col * 18 + key.row * 28) % 360;
       return `hsl(${hue}, 92%, 58%)`;
     }
     if (lighting.mode === 'starlight' || lighting.mode === 'currents') {
-      const hue = (key.col * 31 + key.row * 47 + 160) % 360;
+      const hue = (key.col * 24 + key.row * 47 + 160) % 360;
       return `hsl(${hue}, 88%, 60%)`;
     }
     if (lighting.mode === 'audio') {
-      const hue = (key.col * 20 + (5 - key.row) * 35) % 360;
+      const hue = (key.col * 16 + (5 - key.row) * 35) % 360;
       return `hsl(${hue}, 92%, 56%)`;
     }
     if (lighting.mode === 'neon') {
-      const hue = (key.col * 16 + 180) % 360;
+      const hue = (key.col * 14 + 180) % 360;
       return `hsl(${hue}, 90%, 56%)`;
     }
     return lighting.primaryColor;
@@ -131,10 +131,19 @@ export const KeyboardVisualizer: React.FC<KeyboardVisualizerProps> = ({
   const keys = device.keys || [];
   const maxCol = keys.reduce((m, k) => Math.max(m, k.col + k.width), 16.25);
   const maxRow = keys.reduce((m, k) => Math.max(m, k.row + (k.height || 1)), 6);
+
+  // Fit full-size 23u layout comfortably alongside sidebar
+  const isFullSize = maxCol > 19;
+  const UNIT = isFullSize ? 41 : BASE_UNIT;
+  const ROW_H = isFullSize ? 44 : BASE_ROW_H;
+  const GAP = isFullSize ? 4 : BASE_GAP;
+  const FROW_GAP = isFullSize ? 6 : BASE_FROW_GAP;
+
   const matrixWidth = Math.round(maxCol * UNIT) - GAP;
   const matrixHeight = Math.round(maxRow * ROW_H) + FROW_GAP - GAP;
 
   const isS75Pro = device.id === 'aula-s75-pro';
+  const isF108Pro = device.id === 'aula-f108-pro';
   const currentLayerKeymaps = keymaps[activeLayer] || {};
   const rgbAlpha = lighting.mode === 'off' ? 0 : Math.max(0.18, lighting.brightness / 100);
 
@@ -170,6 +179,41 @@ export const KeyboardVisualizer: React.FC<KeyboardVisualizerProps> = ({
         text: '#0f172a',
         subText: '#64748b',
         legendAccent: '#0284c7',
+      };
+    }
+
+    if (isF108Pro) {
+      // Graphite / Titanium Grey / Charcoal PBT theme matching AULA F108 Pro
+      if (colorGroup === 'accent') {
+        return {
+          skirt: 'linear-gradient(180deg, #7c838f 0%, #636a76 100%)',
+          face: 'linear-gradient(180deg, #b2b8c2 0%, #99a0ac 100%)',
+          border: '#8f96a3',
+          faceBorder: 'rgba(255,255,255,0.55)',
+          text: '#111827',
+          subText: '#374151',
+          legendAccent: '#0369a1',
+        };
+      }
+      if (colorGroup === 'modifier') {
+        return {
+          skirt: 'linear-gradient(180deg, #1b2028 0%, #12161d 100%)',
+          face: 'linear-gradient(180deg, #323945 0%, #262b35 100%)',
+          border: '#3b4351',
+          faceBorder: 'rgba(255,255,255,0.1)',
+          text: '#e5e7eb',
+          subText: '#9ca3af',
+          legendAccent: '#38bdf8',
+        };
+      }
+      return {
+        skirt: 'linear-gradient(180deg, #3c4350 0%, #2c323d 100%)',
+        face: 'linear-gradient(180deg, #5a6372 0%, #4b5362 100%)',
+        border: '#525b6b',
+        faceBorder: 'rgba(255,255,255,0.16)',
+        text: '#f8fafc',
+        subText: '#cbd5e1',
+        legendAccent: '#38bdf8',
       };
     }
 
@@ -211,7 +255,7 @@ export const KeyboardVisualizer: React.FC<KeyboardVisualizerProps> = ({
     <div className="w-full flex flex-col items-center select-none">
       {/* Outer CNC Keyboard Chassis */}
       <div
-        className="relative max-w-full overflow-x-auto rounded-[22px] p-3.5 sm:p-4 transition-all"
+        className="relative max-w-full overflow-x-auto rounded-[20px] p-3 sm:p-4 transition-all"
         style={
           isS75Pro
             ? {
@@ -219,6 +263,13 @@ export const KeyboardVisualizer: React.FC<KeyboardVisualizerProps> = ({
                 border: '1px solid rgba(255,255,255,0.85)',
                 boxShadow:
                   '0 28px 65px -16px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(15, 23, 42, 0.25), inset 0 2px 0 rgba(255, 255, 255, 0.95), inset 0 -4px 0 rgba(148, 163, 184, 0.55)',
+              }
+            : isF108Pro
+            ? {
+                background: 'linear-gradient(180deg, #2b313c 0%, #191d25 60%, #11141a 100%)',
+                border: '1px solid rgba(156, 163, 175, 0.22)',
+                boxShadow:
+                  '0 28px 65px -16px rgba(0, 0, 0, 0.92), inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 -4px 0 rgba(2, 6, 23, 0.85)',
               }
             : {
                 background: 'linear-gradient(180deg, #1f2738 0%, #141a27 65%, #0d121c 100%)',
@@ -241,7 +292,7 @@ export const KeyboardVisualizer: React.FC<KeyboardVisualizerProps> = ({
           style={{
             background: '#0b0f18',
             border: isS75Pro ? '1px solid rgba(100, 116, 139, 0.35)' : '1px solid rgba(30, 41, 59, 0.9)',
-            boxShadow: 'inset 0 4px 14px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 255, 255, 0.35)',
+            boxShadow: 'inset 0 4px 14px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 255, 255, 0.25)',
           }}
         >
           <div
@@ -273,6 +324,53 @@ export const KeyboardVisualizer: React.FC<KeyboardVisualizerProps> = ({
               />
             )}
 
+            {/* F108 Pro Lock Status LEDs (between Esc and F1) + AULA Light Bar (above Arrows) */}
+            {isF108Pro && (
+              <>
+                <div
+                  className="absolute flex flex-col items-center justify-center gap-1.5 pointer-events-none"
+                  style={{
+                    left: `${1.12 * UNIT}px`,
+                    top: '4px',
+                    width: `${0.48 * UNIT}px`,
+                    height: `${ROW_H - GAP - 8}px`,
+                  }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(34,211,238,0.85)]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-600" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/80" />
+                </div>
+
+                <div
+                  className="absolute flex items-center justify-between px-1.5 pointer-events-none"
+                  style={{
+                    left: `${15.5 * UNIT}px`,
+                    top: `${3 * ROW_H + FROW_GAP + Math.round((ROW_H - GAP) / 2) - 8}px`,
+                    width: `${3 * UNIT - GAP}px`,
+                    height: '16px',
+                  }}
+                >
+                  <span className="text-[9px] font-black tracking-[0.22em] text-slate-300/90 font-mono">
+                    AULA
+                  </span>
+                  <div
+                    className="h-[3px] flex-1 ml-2.5 rounded-full transition-all duration-300"
+                    style={{
+                      background:
+                        lighting.mode === 'off'
+                          ? '#1e293b'
+                          : `linear-gradient(90deg, #00f0ff, #22c55e, #f59e0b, ${lighting.primaryColor})`,
+                      boxShadow:
+                        lighting.mode === 'off'
+                          ? 'none'
+                          : `0 0 8px rgba(0, 240, 255, ${0.75 * rgbAlpha})`,
+                      opacity: lighting.mode === 'off' ? 0.5 : rgbAlpha,
+                    }}
+                  />
+                </div>
+              </>
+            )}
+
             {keys.map((key) => {
               const isSelected = selectedKeyId === key.id;
               const isPressed = pressedKeyIds.has(key.id) || externalActiveKeys.has(key.code);
@@ -284,8 +382,9 @@ export const KeyboardVisualizer: React.FC<KeyboardVisualizerProps> = ({
               const widthPx = Math.round(key.width * UNIT - GAP);
               const heightPx = Math.round((key.height || 1) * ROW_H - GAP);
 
-              // Vertical TFT Screen (spanning 2u tall on S75 Pro)
+              // Built-in TFT Screen (Vertical 135x240 on S75 Pro OR Horizontal 240x135 on F108 Pro)
               if (key.isScreen) {
+                const isHorizontalScreen = key.width > (key.height || 1);
                 return (
                   <div
                     key={key.id}
@@ -299,48 +398,85 @@ export const KeyboardVisualizer: React.FC<KeyboardVisualizerProps> = ({
                         'inset 0 2px 8px rgba(0,0,0,0.95), 0 0 0 1px rgba(51, 65, 85, 0.7)',
                     }}
                     className="absolute rounded-[8px] overflow-hidden border-[3px] border-[#1a2234] flex flex-col justify-between cursor-default"
-                    title="Màn hình dọc TFT AULA S75 Pro (135 × 240 px)"
+                    title={
+                      isHorizontalScreen
+                        ? 'Màn hình ngang TFT AULA F108 Pro (240 × 135 px)'
+                        : 'Màn hình dọc TFT AULA S75 Pro (135 × 240 px)'
+                    }
                   >
                     {screenConfig?.currentGifUrl ? (
                       <img
                         src={screenConfig.currentGifUrl}
                         alt="TFT Screen"
                         referrerPolicy="no-referrer"
-                        className="absolute inset-0 w-full h-full object-cover opacity-75"
+                        className="absolute inset-0 w-full h-full object-cover opacity-80"
                       />
                     ) : null}
 
-                    <div className="relative z-10 w-full h-full flex flex-col items-center justify-between py-1.5 px-0.5 bg-gradient-to-b from-black/75 via-black/35 to-black/80 text-white font-mono">
-                      {screenConfig?.showTimeOverlay !== false ? (
-                        <div className="flex flex-col items-center leading-none">
-                          <span className="text-[10px] font-bold tracking-tight tabular-nums text-cyan-200">
-                            {currentTime}
-                          </span>
-                          <span className="text-[7px] tabular-nums text-slate-300 mt-0.5">
-                            {currentDate}
-                          </span>
+                    {isHorizontalScreen ? (
+                      <div className="relative z-10 w-full h-full flex flex-col justify-between py-1 px-2 bg-gradient-to-r from-black/80 via-black/45 to-black/80 text-white font-mono">
+                        <div className="flex items-center justify-between leading-none">
+                          {screenConfig?.showTimeOverlay !== false ? (
+                            <span className="text-[7px] tabular-nums text-slate-300">
+                              {currentDate}
+                            </span>
+                          ) : (
+                            <span />
+                          )}
+                          {screenConfig?.showBatteryOverlay !== false && (
+                            <div className="flex items-center gap-0.5 text-[7px] text-emerald-300 font-bold">
+                              <Battery className="w-2.5 h-2.5" />
+                              <span className="tabular-nums">98%</span>
+                            </div>
+                          )}
                         </div>
-                      ) : (
-                        <div />
-                      )}
 
-                      {screenConfig?.showBatteryOverlay !== false && (
-                        <div className="flex items-center gap-0.5 text-[7px] text-emerald-300 font-bold bg-black/65 px-1 py-0.5 rounded">
-                          <Battery className="w-2.5 h-2.5" />
-                          <span className="tabular-nums">98%</span>
+                        {screenConfig?.showTimeOverlay !== false && (
+                          <div className="flex items-center justify-center leading-none">
+                            <span className="text-[11px] font-bold tracking-tight tabular-nums text-cyan-200 drop-shadow">
+                              {currentTime}
+                            </span>
+                          </div>
+                        )}
+
+                        <div className="w-full flex items-center justify-between text-[6px] font-bold">
+                          <span className="bg-amber-400/90 text-slate-950 rounded-sm px-1">WIN</span>
+                          <span className="bg-cyan-400/90 text-slate-950 rounded-sm px-1">USB</span>
                         </div>
-                      )}
-
-                      <div className="w-full flex items-center justify-center gap-0.5 text-[6px] font-bold">
-                        <span className="bg-amber-400/90 text-slate-950 rounded-sm px-1">W</span>
-                        <span className="bg-cyan-400/90 text-slate-950 rounded-sm px-1">USB</span>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="relative z-10 w-full h-full flex flex-col items-center justify-between py-1.5 px-0.5 bg-gradient-to-b from-black/75 via-black/35 to-black/80 text-white font-mono">
+                        {screenConfig?.showTimeOverlay !== false ? (
+                          <div className="flex flex-col items-center leading-none">
+                            <span className="text-[10px] font-bold tracking-tight tabular-nums text-cyan-200">
+                              {currentTime}
+                            </span>
+                            <span className="text-[7px] tabular-nums text-slate-300 mt-0.5">
+                              {currentDate}
+                            </span>
+                          </div>
+                        ) : (
+                          <div />
+                        )}
+
+                        {screenConfig?.showBatteryOverlay !== false && (
+                          <div className="flex items-center gap-0.5 text-[7px] text-emerald-300 font-bold bg-black/65 px-1 py-0.5 rounded">
+                            <Battery className="w-2.5 h-2.5" />
+                            <span className="tabular-nums">98%</span>
+                          </div>
+                        )}
+
+                        <div className="w-full flex items-center justify-center gap-0.5 text-[6px] font-bold">
+                          <span className="bg-amber-400/90 text-slate-950 rounded-sm px-1">W</span>
+                          <span className="bg-cyan-400/90 text-slate-950 rounded-sm px-1">USB</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               }
 
-              // CNC Rotary Volume Knob (Top-right on S75 Pro / F75)
+              // CNC Rotary Volume Knob (Top-right on S75 Pro / F108 Pro / F75)
               if (key.isKnob) {
                 return (
                   <div

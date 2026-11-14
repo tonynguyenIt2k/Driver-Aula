@@ -31,6 +31,8 @@ import {
 
 interface ScreenTabProps {
   config: ScreenConfig;
+  deviceName?: string;
+  screenResolution?: { width: number; height: number };
   deviceInfo?: ConnectedDeviceInfo;
   isConnected?: boolean;
   onRequestHIDConnect?: () => void;
@@ -60,14 +62,18 @@ const DEFAULT_PRESET_URLS = [
   },
 ];
 
-function createSolidFrame(color = '#090d16'): ScreenFrame {
+function createSolidFrame(
+  width = AULA_TFT_WIDTH,
+  height = AULA_TFT_HEIGHT,
+  color = '#090d16'
+): ScreenFrame {
   const canvas = document.createElement('canvas');
-  canvas.width = AULA_TFT_WIDTH;
-  canvas.height = AULA_TFT_HEIGHT;
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext('2d');
   if (ctx) {
     ctx.fillStyle = color;
-    ctx.fillRect(0, 0, AULA_TFT_WIDTH, AULA_TFT_HEIGHT);
+    ctx.fillRect(0, 0, width, height);
   }
   return {
     id: `f-${Date.now()}-${Math.random()}`,
@@ -78,6 +84,8 @@ function createSolidFrame(color = '#090d16'): ScreenFrame {
 
 export const ScreenTab: React.FC<ScreenTabProps> = ({
   config,
+  deviceName = 'AULA S75 Pro',
+  screenResolution,
   deviceInfo,
   isConnected,
   onRequestHIDConnect,
@@ -85,6 +93,10 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
   onNotify,
   t,
 }) => {
+  const tftWidth = screenResolution?.width ?? AULA_TFT_WIDTH;
+  const tftHeight = screenResolution?.height ?? AULA_TFT_HEIGHT;
+  const isLandscape = tftWidth > tftHeight;
+
   const [animations, setAnimations] = useState<ScreenAnimation[]>([]);
   const [selectedAnimId, setSelectedAnimId] = useState<string>('');
   const [selectedFrameIndex, setSelectedFrameIndex] = useState<number>(0);
@@ -116,14 +128,14 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
   const isDrawingRef = useRef<boolean>(false);
   const previewContainerRef = useRef<HTMLDivElement | null>(null);
 
-  // Initialize built-in portrait presets once
+  // Initialize built-in presets for the active device screen aspect ratio
   useEffect(() => {
     let mounted = true;
     const initPresets = async () => {
       const loaded: ScreenAnimation[] = [];
       for (const p of DEFAULT_PRESET_URLS) {
         try {
-          const frames = await decodeSourceToFrames(p.url, 0);
+          const frames = await decodeSourceToFrames(p.url, 0, 141, tftWidth, tftHeight);
           loaded.push({ id: p.id, name: p.name, frames });
         } catch {
           // Ignore if offline
@@ -131,10 +143,16 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
       }
       if (!mounted) return;
       if (loaded.length === 0) {
-        loaded.push({ id: 'blank-1', name: 'AULA Custom', frames: [createSolidFrame()] });
+        loaded.push({
+          id: 'blank-1',
+          name: 'AULA Custom',
+          frames: [createSolidFrame(tftWidth, tftHeight)],
+        });
       }
       setAnimations(loaded);
       setSelectedAnimId(loaded[0].id);
+      setSelectedFrameIndex(0);
+      setPlayIndex(0);
       if (loaded[0].frames[0]) {
         onChangeConfig({ ...config, currentGifUrl: loaded[0].frames[0].dataUrl });
       }
@@ -143,7 +161,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [tftWidth, tftHeight]);
 
   const currentAnim = animations.find((a) => a.id === selectedAnimId) || animations[0];
   const currentFrames = currentAnim?.frames || [];
@@ -181,10 +199,10 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
       setPayloadSizeKb(null);
       return;
     }
-    const perFrameBytes = AULA_TFT_WIDTH * AULA_TFT_HEIGHT * 2;
+    const perFrameBytes = tftWidth * tftHeight * 2;
     const total = 256 + perFrameBytes * currentFrames.length;
     setPayloadSizeKb(Number((total / 1024).toFixed(1)));
-  }, [currentAnim?.id, currentFrames.length]);
+  }, [currentAnim?.id, currentFrames.length, tftWidth, tftHeight]);
 
   const handleImportMedia = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []) as File[];
@@ -196,7 +214,13 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
     try {
       let mergedFrames: ScreenFrame[] = [];
       for (const file of files) {
-        const decoded = await decodeSourceToFrames(file, config.orientation);
+        const decoded = await decodeSourceToFrames(
+          file,
+          config.orientation,
+          141,
+          tftWidth,
+          tftHeight
+        );
         mergedFrames = [...mergedFrames, ...decoded];
       }
 
@@ -210,7 +234,9 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
       setSelectedAnimId(newAnim.id);
       setSelectedFrameIndex(0);
       setPlayIndex(0);
-      onNotify?.(`Đã nhập "${newAnim.name}" (${mergedFrames.length} khung hình 135×240)`);
+      onNotify?.(
+        `Đã nhập "${newAnim.name}" (${mergedFrames.length} khung hình ${tftWidth}×${tftHeight})`
+      );
     } catch (err: any) {
       setUploadError(err?.message || 'Không thể giải mã tệp ảnh/GIF đã chọn.');
     } finally {
@@ -223,7 +249,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
     const newAnim: ScreenAnimation = {
       id: `anim-${Date.now()}`,
       name: `Custom ${animations.length + 1}`,
-      frames: [createSolidFrame('#090d16')],
+      frames: [createSolidFrame(tftWidth, tftHeight, '#090d16')],
     };
     setAnimations((prev) => [newAnim, ...prev]);
     setSelectedAnimId(newAnim.id);
@@ -284,16 +310,16 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
     );
   };
 
-  // Interactive Pixel / Brush Drawing on the 135x240 canvas in Editing Mode
+  // Interactive Pixel / Brush Drawing on the tftWidth x tftHeight canvas in Editing Mode
   const paintAtClientCoords = async (clientX: number, clientY: number) => {
     if (viewMode !== 'editing' || !currentAnim || !activeFrame || !previewContainerRef.current) return;
     const rect = previewContainerRef.current.getBoundingClientRect();
-    const x = ((clientX - rect.left) / rect.width) * AULA_TFT_WIDTH;
-    const y = ((clientY - rect.top) / rect.height) * AULA_TFT_HEIGHT;
+    const x = ((clientX - rect.left) / rect.width) * tftWidth;
+    const y = ((clientY - rect.top) / rect.height) * tftHeight;
 
     const canvas = document.createElement('canvas');
-    canvas.width = AULA_TFT_WIDTH;
-    canvas.height = AULA_TFT_HEIGHT;
+    canvas.width = tftWidth;
+    canvas.height = tftHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -304,7 +330,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
       el.src = activeFrame.dataUrl;
     });
 
-    ctx.drawImage(img, 0, 0, AULA_TFT_WIDTH, AULA_TFT_HEIGHT);
+    ctx.drawImage(img, 0, 0, tftWidth, tftHeight);
     ctx.fillStyle = textColor;
     ctx.beginPath();
     ctx.arc(x, y, Math.max(1, brushSize / 2), 0, Math.PI * 2);
@@ -329,8 +355,8 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
   const handleBakeTextToFrame = async () => {
     if (!overlayText.trim() || !currentAnim || !activeFrame) return;
     const canvas = document.createElement('canvas');
-    canvas.width = AULA_TFT_WIDTH;
-    canvas.height = AULA_TFT_HEIGHT;
+    canvas.width = tftWidth;
+    canvas.height = tftHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -341,15 +367,16 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
       el.src = activeFrame.dataUrl;
     });
 
-    ctx.drawImage(img, 0, 0, AULA_TFT_WIDTH, AULA_TFT_HEIGHT);
+    ctx.drawImage(img, 0, 0, tftWidth, tftHeight);
     ctx.font = `bold ${fontSize}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.strokeStyle = 'rgba(0,0,0,0.9)';
     ctx.lineWidth = 3;
-    ctx.strokeText(overlayText, AULA_TFT_WIDTH / 2, AULA_TFT_HEIGHT - fontSize - 12);
+    const textY = Math.max(fontSize, tftHeight - fontSize - 10);
+    ctx.strokeText(overlayText, tftWidth / 2, textY);
     ctx.fillStyle = textColor;
-    ctx.fillText(overlayText, AULA_TFT_WIDTH / 2, AULA_TFT_HEIGHT - fontSize - 12);
+    ctx.fillText(overlayText, tftWidth / 2, textY);
 
     const updatedUrl = canvas.toDataURL('image/png');
     setAnimations((prev) =>
@@ -404,7 +431,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
     setMissingScreenPrompt(false);
 
     if (!webhidService.isConnected()) {
-      const msg = 'Chưa kết nối bàn phím AULA S75 Pro qua cáp USB-C WebHID.';
+      const msg = `Chưa kết nối bàn phím ${deviceName} qua cáp USB-C WebHID.`;
       setUploadError(msg);
       onNotify?.(msg);
       return;
@@ -412,15 +439,15 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
 
     setIsUploading(true);
     setUploadProgress(0);
-    setUploadStatusMsg('Đang xóa trắng màn hình TFT (135×240)...');
+    setUploadStatusMsg(`Đang xóa trắng màn hình TFT (${tftWidth}×${tftHeight})...`);
 
     try {
-      const blankPixels = new Uint8Array(AULA_TFT_WIDTH * AULA_TFT_HEIGHT * 2);
+      const blankPixels = new Uint8Array(tftWidth * tftHeight * 2);
       const res = await webhidService.uploadScreenBytes([blankPixels], [1000], (pct) =>
         setUploadProgress(pct)
       );
       if (res.ok) {
-        onNotify?.('Đã xóa trắng màn hình AULA S75 Pro!');
+        onNotify?.(`Đã xóa trắng màn hình ${deviceName}!`);
       } else {
         setUploadError(res.message);
         if (res.missingScreenInterface) setMissingScreenPrompt(true);
@@ -438,9 +465,9 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
     if (!activeFrame) return;
     const a = document.createElement('a');
     a.href = activeFrame.dataUrl;
-    a.download = `${currentAnim?.name || 'aula-s75'}-135x240.png`;
+    a.download = `${currentAnim?.name || 'aula-tft'}-${tftWidth}x${tftHeight}.png`;
     a.click();
-    onNotify?.('Đã xuất khung hình 135×240 px (.png)');
+    onNotify?.(`Đã xuất khung hình ${tftWidth}×${tftHeight} px (.png)`);
   };
 
   const handleFlashToDevice = async () => {
@@ -448,8 +475,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
     setMissingScreenPrompt(false);
 
     if (!webhidService.isConnected()) {
-      const msg =
-        'Chưa kết nối bàn phím AULA S75 Pro qua WebHID thật! Hãy cắm cáp USB-C và kết nối trước khi nạp ảnh/GIF.';
+      const msg = `Chưa kết nối bàn phím ${deviceName} qua WebHID thật! Hãy cắm cáp USB-C và kết nối trước khi nạp ảnh/GIF.`;
       setUploadError(msg);
       onNotify?.(msg);
       return;
@@ -463,7 +489,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
     setIsUploading(true);
     setUploadProgress(0);
     setUploadStatusMsg(
-      `Đang mã hóa ${currentFrames.length} khung RGB565 Little-Endian (135×240)...`
+      `Đang mã hóa ${currentFrames.length} khung RGB565 Little-Endian (${tftWidth}×${tftHeight})...`
     );
 
     try {
@@ -471,11 +497,13 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
         currentFrames,
         overlayText.trim()
           ? { text: overlayText, fontSize, color: textColor }
-          : undefined
+          : undefined,
+        tftWidth,
+        tftHeight
       );
 
       setUploadStatusMsg(
-        `Đang nạp ${encoded.frameCount} khung (135×240, ${(encoded.optimizedBytes / 1024).toFixed(1)} KB) qua cổng Screen 4096B...`
+        `Đang nạp ${encoded.frameCount} khung (${tftWidth}×${tftHeight}, ${(encoded.optimizedBytes / 1024).toFixed(1)} KB) qua cổng Screen 4096B...`
       );
 
       const res = await webhidService.uploadScreenBytes(
@@ -518,7 +546,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
             <span>{t('screenTitle')}</span>
           </h3>
           <p className="text-xs text-slate-400 mt-0.5">
-            Chuẩn AULA S75 Pro (135×240 RGB565 Little-Endian • tối đa 141 frames • truyền 4096B Output qua USB-C)
+            Chuẩn {deviceName} ({tftWidth}×{tftHeight} {isLandscape ? 'màn ngang' : 'màn dọc'} RGB565 Little-Endian • tối đa 141 frames • truyền 4096B Output qua USB-C)
           </p>
         </div>
 
@@ -526,7 +554,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
           <button
             onClick={handleSyncTime}
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 font-bold text-xs transition cursor-pointer"
-            title="Đồng bộ ngày giờ máy tính xuống đồng hồ TFT trên AULA S75 Pro"
+            title={`Đồng bộ ngày giờ máy tính xuống đồng hồ TFT trên ${deviceName}`}
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Time Sync</span>
@@ -571,7 +599,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
               <Usb className="w-4 h-4 text-amber-400 flex-shrink-0" />
               <span>
                 Đã kết nối cổng cấu hình chính của <strong>{deviceInfo.productName}</strong>, nhưng chưa có quyền truy cập{' '}
-                <strong>cổng Screen (4096B Output)</strong>. Hãy bấm nút bên phải và chọn cả mục AULA-S75Pro còn lại trong danh sách WebHID.
+                <strong>cổng Screen (4096B Output)</strong>. Hãy bấm nút bên phải và chọn cả mục {deviceName} còn lại trong danh sách WebHID.
               </span>
             </div>
             {onRequestHIDConnect && (
@@ -593,7 +621,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
               onClick={onRequestHIDConnect}
               className="px-3 py-1.5 rounded-lg bg-rose-400 hover:bg-rose-300 text-slate-950 font-bold cursor-pointer"
             >
-              Chọn lại đủ cổng AULA-S75Pro
+              Chọn lại đủ cổng {deviceName}
             </button>
           )}
         </div>
@@ -645,12 +673,14 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
                       : 'border-slate-800 hover:border-slate-700'
                   }`}
                 >
-                  <div className="h-24 w-full flex items-center justify-center bg-black p-1">
+                  <div className="h-24 w-full flex items-center justify-center bg-black p-1.5">
                     {thumb ? (
                       <img
                         src={thumb}
                         alt={anim.name}
-                        className="h-full w-12 object-cover rounded border border-slate-800"
+                        className={`object-cover rounded border border-slate-800 ${
+                          isLandscape ? 'w-32 h-[72px]' : 'h-full w-12'
+                        }`}
                       />
                     ) : null}
                   </div>
@@ -777,9 +807,9 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
                 onMouseLeave={() => {
                   isDrawingRef.current = false;
                 }}
-                className={`relative w-[162px] h-[288px] rounded-lg bg-black border border-slate-700 overflow-hidden flex items-center justify-center select-none ${
-                  viewMode === 'editing' ? 'cursor-crosshair' : ''
-                }`}
+                className={`relative rounded-lg bg-black border border-slate-700 overflow-hidden flex items-center justify-center select-none ${
+                  isLandscape ? 'w-[312px] h-[175px]' : 'w-[162px] h-[288px]'
+                } ${viewMode === 'editing' ? 'cursor-crosshair' : ''}`}
                 style={{
                   filter: `brightness(${config.brightness / 100})`,
                   transform: `rotate(${config.orientation}deg)`,
@@ -789,7 +819,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
                 {activeFrame ? (
                   <img
                     src={activeFrame.dataUrl}
-                    alt="TFT 135x240"
+                    alt={`TFT ${tftWidth}x${tftHeight}`}
                     draggable={false}
                     className="w-full h-full object-cover pointer-events-none"
                   />
@@ -825,7 +855,13 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
                 {/* HUD Overlays */}
                 <div className="absolute inset-0 flex flex-col items-center justify-between p-2 pointer-events-none">
                   {config.showTimeOverlay ? (
-                    <div className="w-full flex flex-col items-center font-mono font-bold text-white bg-black/60 px-1.5 py-1 rounded">
+                    <div
+                      className={`w-full flex ${
+                        isLandscape
+                          ? 'flex-row items-center justify-between px-2 py-1'
+                          : 'flex-col items-center px-1.5 py-1'
+                      } font-mono font-bold text-white bg-black/60 rounded`}
+                    >
                       <div className="flex items-center gap-1 text-[11px] text-cyan-300">
                         <Clock className="w-3 h-3" />
                         <span>{liveTimeStr}</span>
@@ -836,7 +872,13 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
                     <div />
                   )}
 
-                  <div className="w-full flex flex-col items-center gap-1">
+                  <div
+                    className={`w-full flex ${
+                      isLandscape
+                        ? 'flex-row items-center justify-between gap-1'
+                        : 'flex-col items-center gap-1'
+                    }`}
+                  >
                     {config.showBatteryOverlay && (
                       <div className="text-[9px] font-mono font-bold text-emerald-400 bg-black/65 px-1.5 py-0.5 rounded flex items-center gap-1">
                         <Battery className="w-3 h-3" />
@@ -855,7 +897,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
             </div>
 
             <div className="mt-2.5 flex items-center gap-3 text-[11px] font-mono text-slate-400">
-              <span>135 × 240 px</span>
+              <span>{tftWidth} × {tftHeight} px</span>
               <span>•</span>
               <span className="text-cyan-400 font-bold">{currentFrames.length} frames</span>
               {payloadSizeKb !== null && (
@@ -883,7 +925,9 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
                       setViewMode('editing');
                       setSelectedFrameIndex(idx);
                     }}
-                    className={`relative flex-shrink-0 w-12 h-20 rounded-lg border overflow-hidden cursor-pointer bg-black transition ${
+                    className={`relative flex-shrink-0 rounded-lg border overflow-hidden cursor-pointer bg-black transition ${
+                      isLandscape ? 'w-20 h-12' : 'w-12 h-20'
+                    } ${
                       isSelected
                         ? 'border-amber-500 ring-2 ring-amber-500/40'
                         : 'border-slate-800 hover:border-slate-600'

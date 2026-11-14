@@ -233,12 +233,31 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
+  const selectedDeviceIdRef = React.useRef<string>(selectedDevice.id);
+  selectedDeviceIdRef.current = selectedDevice.id;
+
+  const mapUiDeviceToOpenAulaId = (uiDeviceId: string): string | null => {
+    if (uiDeviceId === 'aula-s75-pro') return 's75pro';
+    if (uiDeviceId === 'aula-f108-pro') return 'f108pro';
+    if (uiDeviceId === 'aula-f75') return 'f75';
+    if (uiDeviceId === 'aula-f87-pro') return 'f87pro';
+    if (uiDeviceId === 'aula-sc620') return 'sc620';
+    return null;
+  };
+
   const syncMatchedDeviceModel = (info: ConnectedDeviceInfo | null) => {
     if (!info || info.connectionType === 'disconnected') return;
     const name = (info.productName || '').toLowerCase();
     let matched: DeviceModel | undefined;
-    if (info.openAulaModelId === 's75pro') {
-      matched = SUPPORTED_DEVICES.find((d) => d.id === 'aula-s75-pro');
+    if (name.includes('f108') || name.includes('108')) {
+      matched = SUPPORTED_DEVICES.find((d) => d.id === 'aula-f108-pro');
+    } else if (info.openAulaModelId === 'f108pro') {
+      matched = SUPPORTED_DEVICES.find((d) => d.id === 'aula-f108-pro');
+    } else if (info.openAulaModelId === 's75pro') {
+      matched =
+        selectedDeviceIdRef.current === 'aula-f108-pro' && !name.includes('s75')
+          ? SUPPORTED_DEVICES.find((d) => d.id === 'aula-f108-pro')
+          : SUPPORTED_DEVICES.find((d) => d.id === 'aula-s75-pro');
     } else if (info.openAulaModelId === 'f75') {
       matched = SUPPORTED_DEVICES.find((d) => d.id === 'aula-f75');
     } else if (info.openAulaModelId === 'f87pro') {
@@ -250,7 +269,10 @@ export default function App() {
       (info.vendorId === 0x0c45 && info.productId === 0x800a) ||
       (info.vendorId === 0x05ac && info.productId === 0x024f)
     ) {
-      matched = SUPPORTED_DEVICES.find((d) => d.id === 'aula-s75-pro');
+      matched =
+        selectedDeviceIdRef.current === 'aula-f108-pro' && !name.includes('s75')
+          ? SUPPORTED_DEVICES.find((d) => d.id === 'aula-f108-pro')
+          : SUPPORTED_DEVICES.find((d) => d.id === 'aula-s75-pro');
     } else if (name.includes('f75') || (info.vendorId === 0x258a && info.productId === 0x010c)) {
       matched = SUPPORTED_DEVICES.find((d) => d.id === 'aula-f75');
     } else if (name.includes('f87') || info.vendorId === 0x38a6) {
@@ -365,6 +387,8 @@ export default function App() {
 
   // Handle Device Change
   const handleSelectDevice = (device: DeviceModel) => {
+    selectedDeviceIdRef.current = device.id;
+    webhidService.setPreferredModel(mapUiDeviceToOpenAulaId(device.id));
     setSelectedDevice(device);
     setLighting(device.defaultLighting);
     setSelectedKey(null);
@@ -724,10 +748,10 @@ export default function App() {
             )}
 
             <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 text-xs text-slate-300 flex flex-col gap-1.5">
-              <div className="font-bold text-cyan-300">Lưu ý để dùng đầy đủ AULA-S75Pro (gồm cả nạp GIF màn hình TFT):</div>
+              <div className="font-bold text-cyan-300">Lưu ý để dùng đầy đủ AULA S75 Pro / F108 Pro (gồm cả nạp GIF màn hình TFT):</div>
               <ul className="list-disc pl-4 space-y-1 text-slate-400">
-                <li>Cắm bàn phím qua cáp USB-C (nếu muốn nạp ảnh/GIF màn hình TFT 135×240) hoặc đầu thu 2.4GHz (LED, Keymap, Macro, Time Sync).</li>
-                <li>Trên Windows/macOS, Chrome có thể hiện nhiều dòng <strong className="text-slate-200">AULA-S75Pro</strong>: hãy cấp quyền cho tất cả các cổng cấu hình & màn hình (nếu thiếu cổng Screen, bấm nút <strong className="text-amber-300">Cấp quyền cổng Screen</strong> trong tab Màn hình TFT).</li>
+                <li>Cắm bàn phím qua cáp USB-C (nếu muốn nạp ảnh/GIF màn hình TFT 135×240 / 240×135) hoặc đầu thu 2.4GHz (LED, Keymap, Macro, Time Sync).</li>
+                <li>Trên Windows/macOS, Chrome có thể hiện nhiều dòng <strong className="text-slate-200">AULA</strong>: hãy cấp quyền cho tất cả các cổng cấu hình & màn hình (nếu thiếu cổng Screen, bấm nút <strong className="text-amber-300">Cấp quyền cổng Screen</strong> trong tab Màn hình TFT).</li>
                 <li>Tắt hẳn phần mềm AULA Driver gốc dưới khay hệ thống (nếu đang chạy nền) để không bị chiếm cổng HID.</li>
               </ul>
             </div>
@@ -860,6 +884,8 @@ export default function App() {
             {activeTab === 'screen' && selectedDevice.hasScreen && (
               <ScreenTab
                 config={screenConfig}
+                deviceName={selectedDevice.name}
+                screenResolution={selectedDevice.screenResolution}
                 deviceInfo={deviceInfo}
                 isConnected={isConnected}
                 onRequestHIDConnect={() => handleConnectHID(false)}

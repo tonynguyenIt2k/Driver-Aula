@@ -26,6 +26,7 @@ import {
 import {
   MODELS,
   hidFilters,
+  modelById,
   modelForDevice,
   attachModel,
   attach,
@@ -92,6 +93,7 @@ class WebHIDService {
   private packets: HIDPacket[] = [];
   private packetListeners: Set<PacketListener> = new Set();
   private statusListeners: Set<StatusListener> = new Set();
+  private preferredOpenAulaModelId: string | null = null;
 
   private deviceInfo: ConnectedDeviceInfo = {
     productName: 'Chưa kết nối thiết bị',
@@ -104,6 +106,21 @@ class WebHIDService {
 
   constructor() {
     this.initHIDListeners();
+  }
+
+  public setPreferredModel(modelId: string | null) {
+    this.preferredOpenAulaModelId = modelId;
+    if (this.kb && modelId && this.kb.model.protocol === 'aula04' && (modelId === 's75pro' || modelId === 'f108pro')) {
+      const nextModel = modelById(modelId) as OpenAulaModel;
+      if (nextModel && nextModel.id !== this.kb.model.id) {
+        this.kb.model = nextModel;
+        this.deviceInfo = {
+          ...this.deviceInfo,
+          openAulaModelId: nextModel.id,
+        };
+        this.notifyStatus();
+      }
+    }
   }
 
   private initHIDListeners() {
@@ -288,7 +305,10 @@ class WebHIDService {
 
       const allPaired: any[] = await navHid.getDevices().catch(() => selected);
       this.pairedDevices = allPaired.length > 0 ? allPaired : selected;
-      const preferredModel = modelForDevice(selected[0]) as OpenAulaModel | undefined;
+      const preferredModel = (modelForDevice as any)(
+        selected[0],
+        this.preferredOpenAulaModelId ?? undefined
+      ) as OpenAulaModel | undefined;
       return await this.attachDevices(this.pairedDevices, preferredModel);
     } catch (err: any) {
       const errMsg = String(err?.message || err || '');
@@ -338,7 +358,12 @@ class WebHIDService {
       return this.connectHardware(false);
     }
     const preferredModel = targetDevice
-      ? (modelForDevice(targetDevice) as OpenAulaModel | undefined)
+      ? ((modelForDevice as any)(
+          targetDevice,
+          this.preferredOpenAulaModelId ?? undefined
+        ) as OpenAulaModel | undefined)
+      : this.preferredOpenAulaModelId
+      ? (modelById(this.preferredOpenAulaModelId) as OpenAulaModel | undefined)
       : undefined;
     return this.attachDevices(pool, preferredModel);
   }
@@ -346,8 +371,13 @@ class WebHIDService {
   private async attachDevices(devices: any[], preferredModel?: OpenAulaModel): Promise<ConnectResult> {
     try {
       let instance: OpenAulaDeviceInstance | null = null;
-      if (preferredModel) {
-        instance = (await attachModel(preferredModel as any, devices, {
+      const fallbackPreferred =
+        preferredModel ||
+        (this.preferredOpenAulaModelId
+          ? (modelById(this.preferredOpenAulaModelId) as OpenAulaModel | undefined)
+          : undefined);
+      if (fallbackPreferred) {
+        instance = (await attachModel(fallbackPreferred as any, devices, {
           log: this.openAulaLog,
           delay: 35,
         })) as OpenAulaDeviceInstance | null;
@@ -360,9 +390,14 @@ class WebHIDService {
       }
 
       if (!instance) {
-        const seenSupported = devices.find((d) => Boolean(modelForDevice(d)));
+        const seenSupported = devices.find((d) =>
+          Boolean((modelForDevice as any)(d, this.preferredOpenAulaModelId ?? undefined))
+        );
         if (seenSupported) {
-          const m = modelForDevice(seenSupported) as OpenAulaModel;
+          const m = (modelForDevice as any)(
+            seenSupported,
+            this.preferredOpenAulaModelId ?? undefined
+          ) as OpenAulaModel;
           return {
             success: false,
             errorType: 'open_failed',
@@ -374,7 +409,7 @@ class WebHIDService {
         return {
           success: false,
           errorType: 'open_failed',
-          message: `Thiết bị "${other?.productName || 'Unknown HID'}" (VID:0x${other?.vendorId?.toString(16)}, PID:0x${other?.productId?.toString(16)}) chưa có trong danh sách 4 mẫu AULA được hỗ trợ (S75 Pro, F75, F87 Pro, SC620).`,
+          message: `Thiết bị "${other?.productName || 'Unknown HID'}" (VID:0x${other?.vendorId?.toString(16)}, PID:0x${other?.productId?.toString(16)}) chưa có trong danh sách 5 mẫu AULA được hỗ trợ (S75 Pro, F108 Pro, F75, F87 Pro, SC620).`,
         };
       }
 
@@ -442,7 +477,7 @@ class WebHIDService {
 
       const missingScreenNote =
         instance.model.features.screen && instance.mode === 'usb' && !instance.screen
-          ? ' (Lưu ý: chưa có cổng Screen 4096B — bấm "Cấp quyền cổng Screen" ở tab Màn hình TFT để chọn thêm cổng còn lại của AULA-S75Pro)'
+          ? ` (Lưu ý: chưa có cổng Screen 4096B — bấm "Cấp quyền cổng Screen" ở tab Màn hình TFT để chọn thêm cổng còn lại của ${instance.model.name})`
           : '';
 
       return {
@@ -741,7 +776,7 @@ class WebHIDService {
 
   public async syncTime(date = new Date()): Promise<CommandResult> {
     if (!this.isConnected() || !this.kb) {
-      return { ok: false, message: 'Chưa kết nối bàn phím AULA S75 Pro qua WebHID thật.' };
+      return { ok: false, message: 'Chưa kết nối bàn phím AULA (S75 Pro / F108 Pro) qua WebHID thật.' };
     }
     try {
       await this.kb.syncTime(1, date);
@@ -849,8 +884,8 @@ class WebHIDService {
         return {
           ok: true,
           message: fullFactory
-            ? 'Đã xóa sạch Base & Fn Keymap xuống bàn phím AULA S75 Pro!'
-            : 'Đã khôi phục Keymap mặc định trên AULA S75 Pro!',
+            ? `Đã xóa sạch Base & Fn Keymap xuống bàn phím ${this.kb.model.name}!`
+            : `Đã khôi phục Keymap mặc định trên ${this.kb.model.name}!`,
         };
       }
       if (fullFactory) {
@@ -875,7 +910,7 @@ class WebHIDService {
     if (!this.isConnected() || !this.kb) {
       return {
         ok: false,
-        message: 'Vui lòng kết nối bàn phím AULA S75 Pro qua cáp USB-C WebHID trước khi nạp GIF.',
+        message: 'Vui lòng kết nối bàn phím AULA có màn hình TFT (S75 Pro / F108 Pro) qua cáp USB-C WebHID trước khi nạp GIF.',
       };
     }
 
@@ -885,7 +920,7 @@ class WebHIDService {
     if (this.kb.mode === '2.4g') {
       return {
         ok: false,
-        message: 'Nạp ảnh/GIF lên màn hình AULA S75 Pro bắt buộc phải cắm cáp USB-C trực tiếp (không qua 2.4GHz).',
+        message: `Nạp ảnh/GIF lên màn hình ${this.kb.model.name} bắt buộc phải cắm cáp USB-C trực tiếp (không qua 2.4GHz).`,
       };
     }
     if (!this.kb.screen) {
@@ -893,7 +928,7 @@ class WebHIDService {
         ok: false,
         missingScreenInterface: true,
         message:
-          'Chưa tìm thấy cổng Screen (4096B Output) của AULA-S75Pro. Hãy bấm "Cấp quyền cổng Screen" và chọn thêm dòng AULA-S75Pro còn lại trong Chrome.',
+          `Chưa tìm thấy cổng Screen (4096B Output) của ${this.kb.model.name}. Hãy bấm "Cấp quyền cổng Screen" và chọn thêm dòng AULA còn lại trong Chrome.`,
       };
     }
 
@@ -905,9 +940,10 @@ class WebHIDService {
       await this.kb.uploadScreen(frames, 1, (frac: number) =>
         onProgress?.(Math.round(frac * 100))
       );
+      const { width, height } = this.kb.model.screen;
       return {
         ok: true,
-        message: `Đã nạp thành công ${frames.length} khung hình (135×240) lên màn hình ${this.kb.model.name}!`,
+        message: `Đã nạp thành công ${frames.length} khung hình (${width}×${height}) lên màn hình ${this.kb.model.name}!`,
       };
     } catch (err: any) {
       return { ok: false, message: `Lỗi nạp ảnh lên màn hình: ${err?.message || err}` };

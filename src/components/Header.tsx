@@ -152,7 +152,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 onClick={onConnectHID}
                 className="flex items-center gap-1.5 px-3 py-1 text-xs rounded bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold transition shadow-sm hover:shadow-cyan-500/20 cursor-pointer"
-                title="Mở hộp thoại chọn thiết bị HID của trình duyệt (AULA-S75Pro, F75, F87, SC620...)"
+                title="Mở hộp thoại chọn thiết bị HID của trình duyệt (AULA S75 Pro, F108 Pro, F75, F87, SC620...)"
               >
                 <Usb className="w-3.5 h-3.5" />
                 <span>{t('connectDevice')}</span>
