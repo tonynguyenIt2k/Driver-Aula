@@ -1,0 +1,177 @@
+{
+  "entities": {
+    "UserAccount": {
+      "title": "User Account",
+      "description": "Root user document owning saved Open AULA profiles and macros.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "photoUrl": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "selectedDeviceId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "activeProfile": {
+          "type": "integer"
+        },
+        "lang": {
+          "type": "string",
+          "enum": ["vi", "en"],
+          "maxLength": 4
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "createdAt", "updatedAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "User Private Info",
+      "description": "Isolated PII record containing verified Google account email.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 254
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "createdAt", "updatedAt"]
+    },
+    "DeviceProfileConfig": {
+      "title": "Device Profile Config",
+      "description": "Saved per-device and per-profile keymaps, RGB lighting, system settings, screen overlay settings, and mouse DPI settings.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "deviceId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "profileSlot": {
+          "type": "integer"
+        },
+        "keymaps": {
+          "type": "object"
+        },
+        "lighting": {
+          "type": "object"
+        },
+        "systemSettings": {
+          "type": "object"
+        },
+        "mouseConfig": {
+          "type": "object"
+        },
+        "screenSettings": {
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "deviceId", "profileSlot", "keymaps", "lighting", "createdAt", "updatedAt"]
+    },
+    "SavedMacro": {
+      "title": "Saved Macro",
+      "description": "User-created keyboard/mouse macro sequence synced across sessions.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "macroId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "repeatMode": {
+          "type": "string",
+          "enum": ["once", "hold", "toggle"],
+          "maxLength": 16
+        },
+        "actions": {
+          "type": "array"
+        },
+        "clientCreatedAt": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "macroId", "name", "repeatMode", "actions", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "Authenticated user root document and app preferences."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "Isolated PII storage (Google email) strictly owned by userId."
+    },
+    "/users/{userId}/profiles/{profileKey}": {
+      "schema": { "$ref": "#/entities/DeviceProfileConfig" },
+      "description": "Device + profile slot settings (keymaps, lighting, system, mouse, screen HUD)."
+    },
+    "/users/{userId}/macros/{macroId}": {
+      "schema": { "$ref": "#/entities/SavedMacro" },
+      "description": "Custom keyboard & mouse macro sequences belonging to the signed-in user."
+    }
+  }
+}

@@ -1,0 +1,169 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isVerifiedOwner(userId) {
+      return isOwner(userId) && request.auth.token.email_verified == true;
+    }
+
+    function isValidUserAccount(data, userId) {
+      return data.keys().hasAll(['uid', 'displayName', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'photoUrl', 'selectedDeviceId', 'activeProfile', 'lang', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid == userId && data.uid == request.auth.uid
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 512))
+        && (!('selectedDeviceId' in data) || (data.selectedDeviceId is string && data.selectedDeviceId.size() >= 1 && data.selectedDeviceId.size() <= 64 && data.selectedDeviceId.matches('^[a-zA-Z0-9_\\-]+$')))
+        && (!('activeProfile' in data) || (data.activeProfile is int && data.activeProfile >= 1 && data.activeProfile <= 3))
+        && (!('lang' in data) || (data.lang is string && data.lang.size() <= 4 && (data.lang == 'vi' || data.lang == 'en')))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivateInfo(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid == userId && data.uid == request.auth.uid
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 254
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidDeviceProfileConfig(data, userId) {
+      return data.keys().hasAll(['ownerId', 'deviceId', 'profileSlot', 'keymaps', 'lighting', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'deviceId', 'profileSlot', 'keymaps', 'lighting', 'systemSettings', 'mouseConfig', 'screenSettings', 'createdAt', 'updatedAt'])
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId == userId && data.ownerId == request.auth.uid
+        && data.deviceId is string && data.deviceId.size() >= 1 && data.deviceId.size() <= 64 && data.deviceId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.profileSlot is int && data.profileSlot >= 1 && data.profileSlot <= 3
+        && data.keymaps is map && data.keymaps.size() <= 8
+        && data.lighting is map && data.lighting.size() <= 24
+        && (!('systemSettings' in data) || (data.systemSettings is map && data.systemSettings.size() <= 16))
+        && (!('mouseConfig' in data) || (data.mouseConfig is map && data.mouseConfig.size() <= 16))
+        && (!('screenSettings' in data) || (data.screenSettings is map && data.screenSettings.size() <= 16))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSavedMacro(data, userId, macroId) {
+      return data.keys().hasAll(['ownerId', 'macroId', 'name', 'repeatMode', 'actions', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'macroId', 'name', 'repeatMode', 'actions', 'clientCreatedAt', 'createdAt', 'updatedAt'])
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId == userId && data.ownerId == request.auth.uid
+        && data.macroId is string && data.macroId.size() >= 1 && data.macroId.size() <= 128 && data.macroId == macroId
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
+        && data.repeatMode is string && data.repeatMode.size() <= 16 && (data.repeatMode == 'once' || data.repeatMode == 'hold' || data.repeatMode == 'toggle')
+        && data.actions is list && data.actions.size() <= 128 && (data.actions.size() == 0 || data.actions[0] is map)
+        && (!('clientCreatedAt' in data) || data.clientCreatedAt is number)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if false;
+      allow create: if isValidId(userId)
+        && isVerifiedOwner(userId)
+        && isValidUserAccount(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isVerifiedOwner(userId)
+        && isValidUserAccount(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoUrl', 'selectedDeviceId', 'activeProfile', 'lang', 'updatedAt']);
+      allow delete: if isValidId(userId) && isVerifiedOwner(userId);
+
+      match /private/{docId} {
+        allow get: if isValidId(userId) && docId == 'info' && isOwner(userId);
+        allow list: if false;
+        allow create: if isValidId(userId)
+          && docId == 'info'
+          && isVerifiedOwner(userId)
+          && isValidUserPrivateInfo(incoming(), userId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow update: if isValidId(userId)
+          && docId == 'info'
+          && isVerifiedOwner(userId)
+          && isValidUserPrivateInfo(incoming(), userId)
+          && incoming().uid == existing().uid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt'])
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow delete: if isValidId(userId) && docId == 'info' && isVerifiedOwner(userId);
+      }
+
+      match /profiles/{profileKey} {
+        allow get: if isValidId(userId) && isValidId(profileKey) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(userId)
+          && isValidId(profileKey)
+          && isVerifiedOwner(userId)
+          && isValidDeviceProfileConfig(incoming(), userId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow update: if isValidId(userId)
+          && isValidId(profileKey)
+          && isVerifiedOwner(userId)
+          && isValidDeviceProfileConfig(incoming(), userId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().deviceId == existing().deviceId
+          && incoming().profileSlot == existing().profileSlot
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['keymaps', 'lighting', 'systemSettings', 'mouseConfig', 'screenSettings', 'updatedAt'])
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow delete: if isValidId(userId) && isValidId(profileKey) && isVerifiedOwner(userId);
+      }
+
+      match /macros/{macroId} {
+        allow get: if isValidId(userId) && isValidId(macroId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(userId)
+          && isValidId(macroId)
+          && isVerifiedOwner(userId)
+          && isValidSavedMacro(incoming(), userId, macroId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow update: if isValidId(userId)
+          && isValidId(macroId)
+          && isVerifiedOwner(userId)
+          && isValidSavedMacro(incoming(), userId, macroId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().macroId == existing().macroId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'repeatMode', 'actions', 'clientCreatedAt', 'updatedAt'])
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow delete: if isValidId(userId) && isValidId(macroId) && isVerifiedOwner(userId);
+      }
+    }
+  }
+}

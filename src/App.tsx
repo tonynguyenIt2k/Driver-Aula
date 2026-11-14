@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
+import { User, onAuthStateChanged } from 'firebase/auth';
 import {
   Keyboard as KeyboardIcon,
   Sparkles,
@@ -15,6 +16,10 @@ import {
   X,
   AlertTriangle,
   Settings,
+  Cloud,
+  CloudOff,
+  Loader2,
+  RefreshCw,
 } from 'lucide-react';
 
 import {
@@ -27,7 +32,6 @@ import {
   ScreenConfig,
   SystemSettings,
   Language,
-  SwitchSoundType,
   HIDPacket,
 } from './types/device';
 
@@ -39,8 +43,22 @@ import {
 import { TRANSLATIONS } from './data/translations';
 import { webhidService, ConnectedDeviceInfo } from './services/webhid';
 import { soundEngine } from './services/soundEngine';
+import { auth } from './firebase';
+import {
+  signInWithGoogle,
+  signOutGoogle,
+  ensureUserDocuments,
+  updateUserPreferences,
+  loadDeviceProfileFromCloud,
+  saveDeviceProfileToCloud,
+  subscribeDeviceProfile,
+  loadUserMacrosFromCloud,
+  syncUserMacrosToCloud,
+  subscribeUserMacros,
+  extractCloudScreenSettings,
+} from './services/firebaseSync';
 
-import { Header } from './components/Header';
+import { Header, CloudSyncStatus } from './components/Header';
 import { KeyboardVisualizer } from './components/KeyboardVisualizer';
 import { MouseVisualizer } from './components/MouseVisualizer';
 import { KeymapTab } from './components/KeymapTab';
@@ -219,6 +237,21 @@ export default function App() {
   const [activeKeys, setActiveKeys] = useState<Set<string>>(new Set());
   const [testedKeys, setTestedKeys] = useState<Set<string>>(new Set());
 
+  // Firebase Auth & Cloud Sync state
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [cloudSessionUid, setCloudSessionUid] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState<boolean>(false);
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatus>('idle');
+  const [lastCloudSavedAt, setLastCloudSavedAt] = useState<number | null>(null);
+
+  const isHydratingProfileRef = useRef<boolean>(false);
+  const isHydratingMacrosRef = useRef<boolean>(false);
+  const profileHydratedKeyRef = useRef<string>('');
+  const macrosHydratedUidRef = useRef<string>('');
+  const prefsHydratedUidRef = useRef<string>('');
+  const lastCloudProfileSigRef = useRef<string>('');
+  const lastCloudMacrosSigRef = useRef<string>('');
+
   // Toast feedback & WebHID connect assistant modal
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [pairedDevices, setPairedDevices] = useState<any[]>([]);
@@ -337,7 +370,7 @@ export default function App() {
     );
   }, [activeKeymapStorageKey, selectedDevice.id, activeProfile]);
 
-  // Persist macros automatically
+  // Persist macros automatically to localStorage
   useEffect(() => {
     try {
       localStorage.setItem('open-aula:macros', JSON.stringify(macros));
@@ -345,6 +378,309 @@ export default function App() {
       // Ignore storage quota errors
     }
   }, [macros]);
+
+  // Listen to Firebase Auth state and bootstrap /users/{uid} + /private/info
+  useEffect(() => {
+    const unsubAuth = onAuthStateChanged(auth, async (user) => {
+      setFirebaseUser(user);
+      if (!user) {
+        setCloudSessionUid(null);
+        setCloudSyncStatus('idle');
+        profileHydratedKeyRef.current = '';
+        macrosHydratedUidRef.current = '';
+        prefsHydratedUidRef.current = '';
+        lastCloudProfileSigRef.current = '';
+        lastCloudMacrosSigRef.current = '';
+        return;
+      }
+
+      setCloudSyncStatus('syncing');
+      try {
+        const savedPrefs = await ensureUserDocuments(user, {
+          selectedDeviceId: selectedDeviceIdRef.current,
+          activeProfile,
+          lang,
+        });
+
+        if (savedPrefs.lang === 'vi' || savedPrefs.lang === 'en') {
+          setLang(savedPrefs.lang);
+        }
+        if (
+          typeof savedPrefs.activeProfile === 'number' &&
+          savedPrefs.activeProfile >= 1 &&
+          savedPrefs.activeProfile <= 3
+        ) {
+          setActiveProfile(savedPrefs.activeProfile);
+        }
+        if (savedPrefs.selectedDeviceId && !webhidService.isConnected()) {
+          const matchedDev = SUPPORTED_DEVICES.find(
+            (d) => d.id === savedPrefs.selectedDeviceId
+          );
+          if (matchedDev) {
+            selectedDeviceIdRef.current = matchedDev.id;
+            webhidService.setPreferredModel(mapUiDeviceToOpenAulaId(matchedDev.id));
+            setSelectedDevice(matchedDev);
+            setLighting(matchedDev.defaultLighting);
+            if (matchedDev.type === 'mouse') {
+              setActiveTab('mouse');
+            }
+          }
+        }
+
+        prefsHydratedUidRef.current = user.uid;
+        setCloudSessionUid(user.uid);
+      } catch (err) {
+        console.error('Firebase user bootstrap failed:', err);
+        setCloudSyncStatus('error');
+        showToast(
+          lang === 'vi'
+            ? 'Không thể khởi tạo hồ sơ Firebase. Vui lòng thử đăng nhập lại.'
+            : 'Failed to initialize Firebase profile.'
+        );
+      }
+    });
+
+    return () => unsubAuth();
+  }, []);
+
+  // Load & subscribe active device profile from Firestore when signed in
+  useEffect(() => {
+    if (!cloudSessionUid) return;
+    let active = true;
+    let unsubProfile: (() => void) | null = null;
+    const comboKey = `${cloudSessionUid}:${selectedDevice.id}:p${activeProfile}`;
+
+    const applyCloudProfile = (cloudProf: NonNullable<Awaited<ReturnType<typeof loadDeviceProfileFromCloud>>>) => {
+      const sig = JSON.stringify(cloudProf);
+      if (sig === lastCloudProfileSigRef.current) return;
+      lastCloudProfileSigRef.current = sig;
+
+      isHydratingProfileRef.current = true;
+      setKeymaps(cloudProf.keymaps);
+      if (cloudProf.lighting) {
+        setLighting({
+          ...selectedDevice.defaultLighting,
+          ...cloudProf.lighting,
+        });
+      }
+      if (cloudProf.systemSettings) {
+        setSystemSettings((prev) => ({ ...prev, ...cloudProf.systemSettings }));
+      }
+      if (cloudProf.mouseConfig) {
+        setMouseConfig((prev) => ({ ...prev, ...cloudProf.mouseConfig }));
+      }
+      if (cloudProf.screenSettings) {
+        setScreenConfig((prev) => ({ ...prev, ...cloudProf.screenSettings }));
+      }
+      setTimeout(() => {
+        isHydratingProfileRef.current = false;
+      }, 80);
+    };
+
+    (async () => {
+      setCloudSyncStatus('syncing');
+      try {
+        const existing = await loadDeviceProfileFromCloud(
+          cloudSessionUid,
+          selectedDevice.id,
+          activeProfile
+        );
+        if (!active) return;
+
+        if (existing) {
+          applyCloudProfile(existing);
+        } else {
+          const initialPayload = {
+            keymaps,
+            lighting,
+            systemSettings,
+            mouseConfig,
+            screenSettings: extractCloudScreenSettings(screenConfig),
+          };
+          lastCloudProfileSigRef.current = JSON.stringify(initialPayload);
+          await saveDeviceProfileToCloud(
+            cloudSessionUid,
+            selectedDevice.id,
+            activeProfile,
+            initialPayload
+          );
+        }
+
+        if (!active) return;
+        profileHydratedKeyRef.current = comboKey;
+        setCloudSyncStatus('synced');
+        setLastCloudSavedAt(Date.now());
+
+        unsubProfile = subscribeDeviceProfile(
+          cloudSessionUid,
+          selectedDevice.id,
+          activeProfile,
+          (cloudProf) => {
+            if (!active || !cloudProf) return;
+            applyCloudProfile(cloudProf);
+            setCloudSyncStatus('synced');
+            setLastCloudSavedAt(Date.now());
+          }
+        );
+      } catch (err) {
+        if (!active) return;
+        console.error('Profile cloud sync error:', err);
+        setCloudSyncStatus('error');
+      }
+    })();
+
+    return () => {
+      active = false;
+      if (unsubProfile) unsubProfile();
+    };
+  }, [cloudSessionUid, selectedDevice.id, activeProfile]);
+
+  // Load & subscribe user macros from Firestore when signed in
+  useEffect(() => {
+    if (!cloudSessionUid) return;
+    let active = true;
+    let unsubMacros: (() => void) | null = null;
+
+    const applyCloudMacros = (cloudMacros: Macro[]) => {
+      const sig = JSON.stringify(cloudMacros);
+      if (sig === lastCloudMacrosSigRef.current) return;
+      lastCloudMacrosSigRef.current = sig;
+
+      isHydratingMacrosRef.current = true;
+      setMacros(cloudMacros);
+      setTimeout(() => {
+        isHydratingMacrosRef.current = false;
+      }, 80);
+    };
+
+    (async () => {
+      try {
+        const existingMacros = await loadUserMacrosFromCloud(cloudSessionUid);
+        if (!active) return;
+
+        if (existingMacros.length > 0) {
+          applyCloudMacros(existingMacros);
+        } else if (macros.length > 0) {
+          lastCloudMacrosSigRef.current = JSON.stringify(macros);
+          await syncUserMacrosToCloud(cloudSessionUid, macros);
+        }
+
+        if (!active) return;
+        macrosHydratedUidRef.current = cloudSessionUid;
+
+        unsubMacros = subscribeUserMacros(cloudSessionUid, (cloudMacros) => {
+          if (!active) return;
+          if (cloudMacros.length === 0 && macrosHydratedUidRef.current !== cloudSessionUid) return;
+          applyCloudMacros(cloudMacros);
+          setLastCloudSavedAt(Date.now());
+        });
+      } catch (err) {
+        if (!active) return;
+        console.error('Macro cloud sync error:', err);
+        setCloudSyncStatus('error');
+      }
+    })();
+
+    return () => {
+      active = false;
+      if (unsubMacros) unsubMacros();
+    };
+  }, [cloudSessionUid]);
+
+  // Debounced auto-save active device profile to Firestore
+  useEffect(() => {
+    if (!cloudSessionUid) return;
+    const comboKey = `${cloudSessionUid}:${selectedDevice.id}:p${activeProfile}`;
+    if (profileHydratedKeyRef.current !== comboKey || isHydratingProfileRef.current) {
+      return;
+    }
+
+    const payload = {
+      keymaps,
+      lighting,
+      systemSettings,
+      mouseConfig,
+      screenSettings: extractCloudScreenSettings(screenConfig),
+    };
+    const nextSig = JSON.stringify(payload);
+    if (nextSig === lastCloudProfileSigRef.current) return;
+
+    const timer = setTimeout(async () => {
+      setCloudSyncStatus('syncing');
+      try {
+        lastCloudProfileSigRef.current = nextSig;
+        await saveDeviceProfileToCloud(
+          cloudSessionUid,
+          selectedDevice.id,
+          activeProfile,
+          payload
+        );
+        setCloudSyncStatus('synced');
+        setLastCloudSavedAt(Date.now());
+      } catch (err) {
+        console.error('Auto-save profile failed:', err);
+        setCloudSyncStatus('error');
+      }
+    }, 700);
+
+    return () => clearTimeout(timer);
+  }, [
+    cloudSessionUid,
+    selectedDevice.id,
+    activeProfile,
+    keymaps,
+    lighting,
+    systemSettings,
+    mouseConfig,
+    screenConfig.brightness,
+    screenConfig.fps,
+    screenConfig.orientation,
+    screenConfig.showTimeOverlay,
+    screenConfig.showBatteryOverlay,
+    screenConfig.showTempOverlay,
+  ]);
+
+  // Debounced auto-save macros to Firestore
+  useEffect(() => {
+    if (!cloudSessionUid) return;
+    if (macrosHydratedUidRef.current !== cloudSessionUid || isHydratingMacrosRef.current) {
+      return;
+    }
+
+    const nextSig = JSON.stringify(macros);
+    if (nextSig === lastCloudMacrosSigRef.current) return;
+
+    const timer = setTimeout(async () => {
+      setCloudSyncStatus('syncing');
+      try {
+        lastCloudMacrosSigRef.current = nextSig;
+        await syncUserMacrosToCloud(cloudSessionUid, macros);
+        setCloudSyncStatus('synced');
+        setLastCloudSavedAt(Date.now());
+      } catch (err) {
+        console.error('Auto-save macros failed:', err);
+        setCloudSyncStatus('error');
+      }
+    }, 700);
+
+    return () => clearTimeout(timer);
+  }, [cloudSessionUid, macros]);
+
+  // Debounced auto-save user preferences (device, profile, language)
+  useEffect(() => {
+    if (!cloudSessionUid || prefsHydratedUidRef.current !== cloudSessionUid) return;
+    const timer = setTimeout(() => {
+      updateUserPreferences(cloudSessionUid, {
+        selectedDeviceId: selectedDevice.id,
+        activeProfile,
+        lang,
+      }).catch((err) => {
+        console.error('Preference update failed:', err);
+      });
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [cloudSessionUid, selectedDevice.id, activeProfile, lang]);
 
   // Listen to physical keyboard events for Switch Sounds & Key Tester
   useEffect(() => {
@@ -598,9 +934,110 @@ export default function App() {
     reader.readAsText(file);
   };
 
+  // Google Sign-In / Sign-Out & Manual Cloud Sync
+  const handleSignInGoogle = async () => {
+    setAuthLoading(true);
+    try {
+      const signedInUser = await signInWithGoogle();
+      showToast(
+        lang === 'vi'
+          ? `Đã đăng nhập Google: ${signedInUser.displayName || signedInUser.email}`
+          : `Signed in as ${signedInUser.displayName || signedInUser.email}`
+      );
+    } catch (error: any) {
+      const code = error?.code || '';
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        showToast(
+          lang === 'vi' ? 'Đã đóng cửa sổ đăng nhập Google.' : 'Google sign-in popup closed.'
+        );
+      } else if (code === 'auth/popup-blocked') {
+        showToast(
+          lang === 'vi'
+            ? 'Trình duyệt đã chặn popup đăng nhập. Hãy cho phép popup hoặc mở tab mới.'
+            : 'Sign-in popup was blocked by browser.'
+        );
+      } else {
+        console.error('Google Sign-In error:', error);
+        showToast(
+          lang === 'vi'
+            ? 'Đăng nhập Google thất bại. Vui lòng thử lại.'
+            : 'Google sign-in failed.'
+        );
+      }
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSignOutGoogle = async () => {
+    try {
+      await signOutGoogle();
+      showToast(lang === 'vi' ? 'Đã đăng xuất tài khoản Google.' : 'Signed out.');
+    } catch (error) {
+      console.error('Sign-out error:', error);
+      showToast(lang === 'vi' ? 'Lỗi khi đăng xuất.' : 'Sign-out failed.');
+    }
+  };
+
+  const handleManualCloudSync = async () => {
+    if (!cloudSessionUid) {
+      handleSignInGoogle();
+      return;
+    }
+    setCloudSyncStatus('syncing');
+    try {
+      const profilePayload = {
+        keymaps,
+        lighting,
+        systemSettings,
+        mouseConfig,
+        screenSettings: extractCloudScreenSettings(screenConfig),
+      };
+      lastCloudProfileSigRef.current = JSON.stringify(profilePayload);
+      lastCloudMacrosSigRef.current = JSON.stringify(macros);
+
+      await Promise.all([
+        saveDeviceProfileToCloud(
+          cloudSessionUid,
+          selectedDevice.id,
+          activeProfile,
+          profilePayload
+        ),
+        syncUserMacrosToCloud(cloudSessionUid, macros),
+        updateUserPreferences(cloudSessionUid, {
+          selectedDeviceId: selectedDevice.id,
+          activeProfile,
+          lang,
+        }),
+      ]);
+      setCloudSyncStatus('synced');
+      setLastCloudSavedAt(Date.now());
+      showToast(
+        lang === 'vi'
+          ? `Đã lưu đồng bộ ${selectedDevice.name} (P${activeProfile}) & Macro lên Firebase!`
+          : `Synced ${selectedDevice.name} (P${activeProfile}) & Macros to Firebase!`
+      );
+    } catch (error) {
+      console.error('Manual cloud sync error:', error);
+      setCloudSyncStatus('error');
+      showToast(
+        lang === 'vi' ? 'Lỗi đồng bộ lên Firebase Cloud.' : 'Failed to sync to Firebase Cloud.'
+      );
+    }
+  };
+
   const handleFactoryReset = () => {
-    setLighting(selectedDevice.defaultLighting);
-    setKeymaps(EMPTY_KEYMAPS());
+    const resetLighting = selectedDevice.defaultLighting;
+    const resetKeymaps = EMPTY_KEYMAPS();
+    const resetSystem: SystemSettings = {
+      debounceLevel: 2,
+      sleepMinutes: 1,
+      disableWinKey: false,
+      disableAltF4: false,
+      disableAltTab: false,
+    };
+    setLighting(resetLighting);
+    setKeymaps(resetKeymaps);
     try {
       localStorage.removeItem(getKeymapStorageKey(selectedDevice.id, activeProfile));
     } catch {
@@ -608,13 +1045,7 @@ export default function App() {
     }
     setMacros(INITIAL_MACROS);
     setMouseConfig(DEFAULT_MOUSE_CONFIG);
-    setSystemSettings({
-      debounceLevel: 2,
-      sleepMinutes: 1,
-      disableWinKey: false,
-      disableAltF4: false,
-      disableAltTab: false,
-    });
+    setSystemSettings(resetSystem);
     webhidService.clearPackets();
     showToast('Đã khôi phục toàn bộ cài đặt gốc AULA!');
   };
@@ -667,6 +1098,20 @@ export default function App() {
         onExportProfile={handleExportProfile}
         onImportProfile={handleImportProfile}
         onFactoryReset={handleFactoryReset}
+        user={
+          firebaseUser
+            ? {
+                uid: firebaseUser.uid,
+                displayName: firebaseUser.displayName,
+                email: firebaseUser.email,
+                photoURL: firebaseUser.photoURL,
+              }
+            : null
+        }
+        authLoading={authLoading}
+        cloudSyncStatus={cloudSyncStatus}
+        onSignInGoogle={handleSignInGoogle}
+        onSignOutGoogle={handleSignOutGoogle}
       />
 
       {/* Real Hardware Status Banner */}
@@ -1000,6 +1445,107 @@ export default function App() {
               </div>
             </div>
           )}
+
+          {/* Firebase Cloud Sync Sidebar Card */}
+          <div className="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-4 flex flex-col gap-3 text-xs shadow-lg">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 font-semibold text-slate-200">
+                {cloudSyncStatus === 'syncing' ? (
+                  <Loader2 className="w-4 h-4 text-cyan-400 animate-spin shrink-0" />
+                ) : cloudSyncStatus === 'error' ? (
+                  <CloudOff className="w-4 h-4 text-rose-400 shrink-0" />
+                ) : (
+                  <Cloud
+                    className={`w-4 h-4 shrink-0 ${
+                      firebaseUser ? 'text-emerald-400' : 'text-slate-400'
+                    }`}
+                  />
+                )}
+                <span>Firebase Cloud</span>
+              </div>
+              {firebaseUser && lastCloudSavedAt && (
+                <span className="font-mono tabular-nums text-[10px] text-slate-400">
+                  {new Date(lastCloudSavedAt).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                  })}
+                </span>
+              )}
+            </div>
+
+            {firebaseUser ? (
+              <>
+                <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-2.5 flex items-center gap-2.5">
+                  {firebaseUser.photoURL ? (
+                    <img
+                      src={firebaseUser.photoURL}
+                      alt={firebaseUser.displayName || 'User'}
+                      referrerPolicy="no-referrer"
+                      className="w-8 h-8 rounded-lg object-cover border border-slate-700 shrink-0"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 rounded-lg bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 font-bold flex items-center justify-center shrink-0">
+                      {(firebaseUser.displayName || firebaseUser.email || 'U')
+                        .charAt(0)
+                        .toUpperCase()}
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-slate-100 truncate">
+                      {firebaseUser.displayName || 'Google User'}
+                    </div>
+                    <div className="text-[11px] text-slate-400 truncate">
+                      {firebaseUser.email || ''}
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  {lang === 'vi'
+                    ? `Tự động đồng bộ Keymap, LED, Macro và Profile P${activeProfile} của ${selectedDevice.name}.`
+                    : `Auto-syncing Keymap, RGB, Macros & Profile P${activeProfile} for ${selectedDevice.name}.`}
+                </p>
+
+                <button
+                  onClick={handleManualCloudSync}
+                  disabled={cloudSyncStatus === 'syncing'}
+                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/40 font-semibold transition cursor-pointer disabled:opacity-60"
+                >
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 ${
+                      cloudSyncStatus === 'syncing' ? 'animate-spin' : ''
+                    }`}
+                  />
+                  <span>
+                    {lang === 'vi' ? 'Lưu ngay lên Cloud' : 'Sync to Cloud Now'}
+                  </span>
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  {lang === 'vi'
+                    ? 'Đăng nhập Google để lưu và đồng bộ Keymap, LED, Macro, Profile P1-P3 giữa các máy.'
+                    : 'Sign in with Google to backup and sync Keymap, RGB, Macros and Profiles across devices.'}
+                </p>
+                <button
+                  onClick={handleSignInGoogle}
+                  disabled={authLoading}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-600/80 hover:border-cyan-500/60 font-semibold transition cursor-pointer disabled:opacity-60"
+                >
+                  {authLoading ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+                  ) : (
+                    <Cloud className="w-3.5 h-3.5 text-cyan-400" />
+                  )}
+                  <span>
+                    {lang === 'vi' ? 'Đăng nhập Google' : 'Sign in with Google'}
+                  </span>
+                </button>
+              </>
+            )}
+          </div>
         </aside>
       </main>
     </div>
