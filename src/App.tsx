@@ -20,6 +20,8 @@ import {
   CloudOff,
   Loader2,
   RefreshCw,
+  Smartphone,
+  Monitor,
 } from 'lucide-react';
 
 import {
@@ -49,6 +51,7 @@ import {
   signOutGoogle,
   ensureUserDocuments,
   updateUserPreferences,
+  subscribeUserPreferences,
   loadDeviceProfileFromCloud,
   saveDeviceProfileToCloud,
   subscribeDeviceProfile,
@@ -56,6 +59,16 @@ import {
   syncUserMacrosToCloud,
   subscribeUserMacros,
   extractCloudScreenSettings,
+  stableStringify,
+  publishBridgeStatus,
+  subscribeBridgeStatus,
+  dispatchRemoteCommand,
+  subscribeRemoteCommands,
+  completeRemoteCommand,
+  cleanupRemoteCommand,
+  CloudBridgeStatus,
+  CloudDeviceProfile,
+  RemoteCommandType,
 } from './services/firebaseSync';
 
 import { Header, CloudSyncStatus } from './components/Header';
@@ -243,14 +256,25 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState<boolean>(false);
   const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatus>('idle');
   const [lastCloudSavedAt, setLastCloudSavedAt] = useState<number | null>(null);
+  const [remoteBridge, setRemoteBridge] = useState<CloudBridgeStatus | null>(null);
 
+  const clientIdRef = useRef<string>(
+    `cli_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  );
   const isHydratingProfileRef = useRef<boolean>(false);
   const isHydratingMacrosRef = useRef<boolean>(false);
+  const isHydratingPrefsRef = useRef<boolean>(false);
   const profileHydratedKeyRef = useRef<string>('');
   const macrosHydratedUidRef = useRef<string>('');
   const prefsHydratedUidRef = useRef<string>('');
   const lastCloudProfileSigRef = useRef<string>('');
   const lastCloudMacrosSigRef = useRef<string>('');
+  const lastCloudPrefsSigRef = useRef<string>('');
+  const lastAppliedHwProfileRef = useRef<CloudDeviceProfile | null>(null);
+  const applyProfileOnNextLoadRef = useRef<boolean>(false);
+  const wasHostingBridgeRef = useRef<boolean>(false);
+  const processedCmdIdsRef = useRef<Set<string>>(new Set());
+  const sentCmdIdsRef = useRef<Set<string>>(new Set());
 
   // Toast feedback & WebHID connect assistant modal
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -265,6 +289,39 @@ export default function App() {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
   };
+
+  const latestStateRef = useRef({
+    selectedDevice,
+    activeProfile,
+    activeLayer,
+    keymaps,
+    lighting,
+    systemSettings,
+    mouseConfig,
+    screenConfig,
+    macros,
+    lang,
+  });
+  latestStateRef.current = {
+    selectedDevice,
+    activeProfile,
+    activeLayer,
+    keymaps,
+    lighting,
+    systemSettings,
+    mouseConfig,
+    screenConfig,
+    macros,
+    lang,
+  };
+
+  const isRemoteBridgeOnline = Boolean(
+    !isConnected &&
+      cloudSessionUid &&
+      remoteBridge?.online &&
+      remoteBridge?.hidConnected &&
+      remoteBridge.clientHostId !== clientIdRef.current
+  );
 
   const selectedDeviceIdRef = React.useRef<string>(selectedDevice.id);
   selectedDeviceIdRef.current = selectedDevice.id;
@@ -385,12 +442,15 @@ export default function App() {
       setFirebaseUser(user);
       if (!user) {
         setCloudSessionUid(null);
+        setRemoteBridge(null);
         setCloudSyncStatus('idle');
         profileHydratedKeyRef.current = '';
         macrosHydratedUidRef.current = '';
         prefsHydratedUidRef.current = '';
         lastCloudProfileSigRef.current = '';
         lastCloudMacrosSigRef.current = '';
+        lastCloudPrefsSigRef.current = '';
+        lastAppliedHwProfileRef.current = null;
         return;
       }
 
@@ -402,6 +462,7 @@ export default function App() {
           lang,
         });
 
+        isHydratingPrefsRef.current = true;
         if (savedPrefs.lang === 'vi' || savedPrefs.lang === 'en') {
           setLang(savedPrefs.lang);
         }
@@ -426,6 +487,14 @@ export default function App() {
             }
           }
         }
+        lastCloudPrefsSigRef.current = stableStringify({
+          selectedDeviceId: savedPrefs.selectedDeviceId || selectedDeviceIdRef.current,
+          activeProfile: savedPrefs.activeProfile ?? activeProfile,
+          lang: savedPrefs.lang ?? lang,
+        });
+        setTimeout(() => {
+          isHydratingPrefsRef.current = false;
+        }, 80);
 
         prefsHydratedUidRef.current = user.uid;
         setCloudSessionUid(user.uid);
@@ -443,6 +512,194 @@ export default function App() {
     return () => unsubAuth();
   }, []);
 
+  // Subscribe to real-time user preferences (device, profile, language) across Phone <-> PC
+  useEffect(() => {
+    if (!cloudSessionUid) return;
+    const unsubPrefs = subscribeUserPreferences(cloudSessionUid, (prefs) => {
+      const nextDeviceId = prefs.selectedDeviceId || latestStateRef.current.selectedDevice.id;
+      const nextProfile = prefs.activeProfile ?? latestStateRef.current.activeProfile;
+      const nextLang = prefs.lang ?? latestStateRef.current.lang;
+      const sig = stableStringify({
+        selectedDeviceId: nextDeviceId,
+        activeProfile: nextProfile,
+        lang: nextLang,
+      });
+      if (sig === lastCloudPrefsSigRef.current) return;
+      lastCloudPrefsSigRef.current = sig;
+
+      isHydratingPrefsRef.current = true;
+      let switchedProfileOrDevice = false;
+
+      if (nextLang && nextLang !== latestStateRef.current.lang) {
+        setLang(nextLang);
+      }
+      if (nextProfile >= 1 && nextProfile <= 3 && nextProfile !== latestStateRef.current.activeProfile) {
+        setActiveProfile(nextProfile);
+        switchedProfileOrDevice = true;
+      }
+      if (nextDeviceId !== latestStateRef.current.selectedDevice.id) {
+        const matchedDev = SUPPORTED_DEVICES.find((d) => d.id === nextDeviceId);
+        if (matchedDev) {
+          const canSwitchConnected =
+            !webhidService.isConnected() ||
+            ((matchedDev.id === 'aula-s75-pro' || matchedDev.id === 'aula-f108-pro') &&
+              webhidService.getDeviceInfo().protocolFamily === 'aula04');
+          if (canSwitchConnected) {
+            selectedDeviceIdRef.current = matchedDev.id;
+            webhidService.setPreferredModel(mapUiDeviceToOpenAulaId(matchedDev.id));
+            setSelectedDevice(matchedDev);
+            setLighting(matchedDev.defaultLighting);
+            if (matchedDev.type === 'mouse') {
+              setActiveTab('mouse');
+            } else if (activeTab === 'mouse') {
+              setActiveTab('keymap');
+            }
+            switchedProfileOrDevice = true;
+          }
+        }
+      }
+
+      if (switchedProfileOrDevice && webhidService.isConnected()) {
+        applyProfileOnNextLoadRef.current = true;
+      }
+
+      setTimeout(() => {
+        isHydratingPrefsRef.current = false;
+      }, 100);
+    });
+
+    return () => unsubPrefs();
+  }, [cloudSessionUid]);
+
+  // Publish PC WebHID Bridge status when connected; subscribe to Bridge status on Phone/other tabs
+  useEffect(() => {
+    if (!cloudSessionUid) return;
+
+    const unsubBridge = subscribeBridgeStatus(cloudSessionUid, (status) => {
+      setRemoteBridge(status);
+    });
+
+    return () => unsubBridge();
+  }, [cloudSessionUid]);
+
+  useEffect(() => {
+    if (!cloudSessionUid) return;
+
+    if (isConnected) {
+      wasHostingBridgeRef.current = true;
+      publishBridgeStatus(cloudSessionUid, {
+        online: true,
+        hidConnected: true,
+        deviceId: selectedDevice.id,
+        productName: deviceInfo.productName || selectedDevice.name,
+        connectionType: deviceInfo.connectionType,
+        batteryLevel: deviceInfo.batteryLevel,
+        clientHostId: clientIdRef.current,
+      }).catch((err) => console.error('Publish bridge status failed:', err));
+    } else if (wasHostingBridgeRef.current) {
+      wasHostingBridgeRef.current = false;
+      publishBridgeStatus(cloudSessionUid, {
+        online: false,
+        hidConnected: false,
+        deviceId: selectedDevice.id,
+        productName: selectedDevice.name,
+        connectionType: 'disconnected',
+        batteryLevel: null,
+        clientHostId: clientIdRef.current,
+      }).catch((err) => console.error('Clear bridge status failed:', err));
+    }
+  }, [
+    cloudSessionUid,
+    isConnected,
+    selectedDevice.id,
+    selectedDevice.name,
+    deviceInfo.productName,
+    deviceInfo.connectionType,
+    deviceInfo.batteryLevel,
+  ]);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (cloudSessionUid && wasHostingBridgeRef.current) {
+        publishBridgeStatus(cloudSessionUid, {
+          online: false,
+          hidConnected: false,
+          deviceId: latestStateRef.current.selectedDevice.id,
+          productName: latestStateRef.current.selectedDevice.name,
+          connectionType: 'disconnected',
+          batteryLevel: null,
+          clientHostId: clientIdRef.current,
+        }).catch(() => {});
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [cloudSessionUid]);
+
+  // Auto-apply remote profile diffs onto physical WebHID hardware when PC is connected
+  const syncRemoteDiffToHardware = async (
+    prevHw: CloudDeviceProfile | null,
+    nextProf: CloudDeviceProfile,
+    device: DeviceModel,
+    macrosList: Macro[],
+    forceApplyAll = false
+  ) => {
+    if (!webhidService.isConnected()) return;
+    const keys = device.keys || [];
+    const appliedMessages: string[] = [];
+
+    const prevLightSig = prevHw ? stableStringify(prevHw.lighting) : '';
+    const nextLightSig = stableStringify(nextProf.lighting);
+    if ((forceApplyAll || (prevHw && prevLightSig !== nextLightSig)) && nextProf.lighting) {
+      const mergedLight = { ...device.defaultLighting, ...nextProf.lighting };
+      const res = await webhidService.applyLighting(mergedLight, keys);
+      if (res.ok) appliedMessages.push('LED RGB');
+    }
+
+    if (device.type === 'keyboard') {
+      for (const layerIdx of [0, 1]) {
+        const prevLayerSig = prevHw ? stableStringify(prevHw.keymaps?.[layerIdx] || {}) : '';
+        const nextLayerMap = nextProf.keymaps?.[layerIdx] || {};
+        const nextLayerSig = stableStringify(nextLayerMap);
+        if (forceApplyAll || (prevHw && prevLayerSig !== nextLayerSig)) {
+          const res = await webhidService.applyKeymap(
+            layerIdx,
+            0,
+            { type: 'default', value: '', label: 'Default', category: 'Default' },
+            keys,
+            nextLayerMap,
+            macrosList
+          );
+          if (res.ok) appliedMessages.push(layerIdx === 1 ? 'Fn Keymap' : 'Keymap');
+        }
+      }
+
+      if (nextProf.systemSettings) {
+        const prevSysSig = prevHw ? stableStringify(prevHw.systemSettings || {}) : '';
+        const nextSysSig = stableStringify(nextProf.systemSettings);
+        if (forceApplyAll || (prevHw && prevSysSig !== nextSysSig)) {
+          const res = await webhidService.applySystemSettings(nextProf.systemSettings);
+          if (res.ok) appliedMessages.push('System');
+        }
+      }
+    } else if (device.type === 'mouse' && nextProf.mouseConfig) {
+      const prevMouseSig = prevHw ? stableStringify(prevHw.mouseConfig || {}) : '';
+      const nextMouseSig = stableStringify(nextProf.mouseConfig);
+      if (forceApplyAll || (prevHw && prevMouseSig !== nextMouseSig)) {
+        const res = await webhidService.applyMouseConfig(nextProf.mouseConfig);
+        if (res.ok) appliedMessages.push('Mouse DPI');
+      }
+    }
+
+    if (appliedMessages.length > 0) {
+      showToast(
+        latestStateRef.current.lang === 'vi'
+          ? `Đã đồng bộ từ điện thoại/Cloud xuống ${device.name}: ${appliedMessages.join(', ')}`
+          : `Synced from remote to ${device.name}: ${appliedMessages.join(', ')}`
+      );
+    }
+  };
+
   // Load & subscribe active device profile from Firestore when signed in
   useEffect(() => {
     if (!cloudSessionUid) return;
@@ -450,31 +707,62 @@ export default function App() {
     let unsubProfile: (() => void) | null = null;
     const comboKey = `${cloudSessionUid}:${selectedDevice.id}:p${activeProfile}`;
 
-    const applyCloudProfile = (cloudProf: NonNullable<Awaited<ReturnType<typeof loadDeviceProfileFromCloud>>>) => {
-      const sig = JSON.stringify(cloudProf);
-      if (sig === lastCloudProfileSigRef.current) return;
+    const applyCloudProfile = (
+      cloudProf: CloudDeviceProfile,
+      isRemoteUpdate: boolean,
+      forceHwApply = false
+    ) => {
+      const normalizedProf: CloudDeviceProfile = {
+        keymaps: cloudProf.keymaps,
+        lighting: {
+          ...selectedDevice.defaultLighting,
+          ...cloudProf.lighting,
+        },
+        systemSettings: cloudProf.systemSettings
+          ? { ...latestStateRef.current.systemSettings, ...cloudProf.systemSettings }
+          : latestStateRef.current.systemSettings,
+        mouseConfig: cloudProf.mouseConfig
+          ? { ...latestStateRef.current.mouseConfig, ...cloudProf.mouseConfig }
+          : latestStateRef.current.mouseConfig,
+        screenSettings: cloudProf.screenSettings
+          ? cloudProf.screenSettings
+          : extractCloudScreenSettings(latestStateRef.current.screenConfig),
+      };
+
+      const sig = stableStringify(normalizedProf);
+      if (sig === lastCloudProfileSigRef.current && !forceHwApply) return;
       lastCloudProfileSigRef.current = sig;
 
       isHydratingProfileRef.current = true;
-      setKeymaps(cloudProf.keymaps);
-      if (cloudProf.lighting) {
-        setLighting({
-          ...selectedDevice.defaultLighting,
-          ...cloudProf.lighting,
-        });
+      setKeymaps(normalizedProf.keymaps);
+      if (normalizedProf.lighting) {
+        setLighting(normalizedProf.lighting);
       }
-      if (cloudProf.systemSettings) {
-        setSystemSettings((prev) => ({ ...prev, ...cloudProf.systemSettings }));
+      if (normalizedProf.systemSettings) {
+        setSystemSettings(normalizedProf.systemSettings);
       }
-      if (cloudProf.mouseConfig) {
-        setMouseConfig((prev) => ({ ...prev, ...cloudProf.mouseConfig }));
+      if (normalizedProf.mouseConfig) {
+        setMouseConfig(normalizedProf.mouseConfig);
       }
-      if (cloudProf.screenSettings) {
-        setScreenConfig((prev) => ({ ...prev, ...cloudProf.screenSettings }));
+      if (normalizedProf.screenSettings) {
+        setScreenConfig((prev) => ({ ...prev, ...normalizedProf.screenSettings }));
       }
       setTimeout(() => {
         isHydratingProfileRef.current = false;
-      }, 80);
+      }, 100);
+
+      const prevHw = lastAppliedHwProfileRef.current;
+      lastAppliedHwProfileRef.current = normalizedProf;
+
+      if ((isRemoteUpdate || forceHwApply) && webhidService.isConnected()) {
+        syncRemoteDiffToHardware(
+          prevHw,
+          normalizedProf,
+          selectedDevice,
+          latestStateRef.current.macros,
+          forceHwApply
+        ).catch((err) => console.error('Auto-apply remote hardware failed:', err));
+      }
     };
 
     (async () => {
@@ -487,17 +775,21 @@ export default function App() {
         );
         if (!active) return;
 
+        const forceApply = applyProfileOnNextLoadRef.current;
+        applyProfileOnNextLoadRef.current = false;
+
         if (existing) {
-          applyCloudProfile(existing);
+          applyCloudProfile(existing, false, forceApply);
         } else {
-          const initialPayload = {
-            keymaps,
-            lighting,
-            systemSettings,
-            mouseConfig,
-            screenSettings: extractCloudScreenSettings(screenConfig),
+          const initialPayload: CloudDeviceProfile = {
+            keymaps: latestStateRef.current.keymaps,
+            lighting: latestStateRef.current.lighting,
+            systemSettings: latestStateRef.current.systemSettings,
+            mouseConfig: latestStateRef.current.mouseConfig,
+            screenSettings: extractCloudScreenSettings(latestStateRef.current.screenConfig),
           };
-          lastCloudProfileSigRef.current = JSON.stringify(initialPayload);
+          lastCloudProfileSigRef.current = stableStringify(initialPayload);
+          lastAppliedHwProfileRef.current = initialPayload;
           await saveDeviceProfileToCloud(
             cloudSessionUid,
             selectedDevice.id,
@@ -517,7 +809,7 @@ export default function App() {
           activeProfile,
           (cloudProf) => {
             if (!active || !cloudProf) return;
-            applyCloudProfile(cloudProf);
+            applyCloudProfile(cloudProf, true, false);
             setCloudSyncStatus('synced');
             setLastCloudSavedAt(Date.now());
           }
@@ -542,7 +834,7 @@ export default function App() {
     let unsubMacros: (() => void) | null = null;
 
     const applyCloudMacros = (cloudMacros: Macro[]) => {
-      const sig = JSON.stringify(cloudMacros);
+      const sig = stableStringify(cloudMacros);
       if (sig === lastCloudMacrosSigRef.current) return;
       lastCloudMacrosSigRef.current = sig;
 
@@ -550,7 +842,7 @@ export default function App() {
       setMacros(cloudMacros);
       setTimeout(() => {
         isHydratingMacrosRef.current = false;
-      }, 80);
+      }, 100);
     };
 
     (async () => {
@@ -560,9 +852,9 @@ export default function App() {
 
         if (existingMacros.length > 0) {
           applyCloudMacros(existingMacros);
-        } else if (macros.length > 0) {
-          lastCloudMacrosSigRef.current = JSON.stringify(macros);
-          await syncUserMacrosToCloud(cloudSessionUid, macros);
+        } else if (latestStateRef.current.macros.length > 0) {
+          lastCloudMacrosSigRef.current = stableStringify(latestStateRef.current.macros);
+          await syncUserMacrosToCloud(cloudSessionUid, latestStateRef.current.macros);
         }
 
         if (!active) return;
@@ -587,7 +879,122 @@ export default function App() {
     };
   }, [cloudSessionUid]);
 
-  // Debounced auto-save active device profile to Firestore
+  // Subscribe to Remote Hardware Commands (Phone -> Firebase -> PC WebHID Bridge)
+  useEffect(() => {
+    if (!cloudSessionUid) return;
+
+    const unsubCmds = subscribeRemoteCommands(cloudSessionUid, async (commands) => {
+      for (const cmd of commands) {
+        // Phone / sender receives completion feedback from PC
+        if (
+          cmd.senderId === clientIdRef.current &&
+          sentCmdIdsRef.current.has(cmd.commandId) &&
+          cmd.status !== 'pending'
+        ) {
+          sentCmdIdsRef.current.delete(cmd.commandId);
+          showToast(
+            cmd.status === 'completed'
+              ? `Máy tính đã thực thi: ${cmd.resultMessage || 'Thành công'}`
+              : `Máy tính báo lỗi: ${cmd.resultMessage || 'Không thể thực thi'}`
+          );
+          continue;
+        }
+
+        // PC WebHID Bridge executes pending commands sent by Phone/other devices
+        if (
+          cmd.status === 'pending' &&
+          cmd.senderId !== clientIdRef.current &&
+          webhidService.isConnected() &&
+          !processedCmdIdsRef.current.has(cmd.commandId)
+        ) {
+          processedCmdIdsRef.current.add(cmd.commandId);
+          try {
+            const devModel =
+              SUPPORTED_DEVICES.find((d) => d.id === cmd.deviceId) ||
+              latestStateRef.current.selectedDevice;
+            const devKeys = devModel.keys || [];
+            const [freshProf, freshMacros] = await Promise.all([
+              loadDeviceProfileFromCloud(cloudSessionUid, cmd.deviceId, cmd.profileSlot),
+              loadUserMacrosFromCloud(cloudSessionUid),
+            ]);
+            const effectiveMacros =
+              freshMacros.length > 0 ? freshMacros : latestStateRef.current.macros;
+
+            let res: { ok: boolean; message: string } = {
+              ok: false,
+              message: 'Lệnh không xác định.',
+            };
+
+            if (cmd.type === 'apply_lighting') {
+              const lightCfg = freshProf?.lighting
+                ? { ...devModel.defaultLighting, ...freshProf.lighting }
+                : latestStateRef.current.lighting;
+              res = await webhidService.applyLighting(lightCfg, devKeys);
+            } else if (cmd.type === 'apply_keymap') {
+              const layerIdx = cmd.layer ?? latestStateRef.current.activeLayer;
+              const layerMap =
+                freshProf?.keymaps?.[layerIdx] ??
+                latestStateRef.current.keymaps[layerIdx] ??
+                {};
+              res = await webhidService.applyKeymap(
+                layerIdx,
+                0,
+                { type: 'default', value: '', label: 'Default', category: 'Default' },
+                devKeys,
+                layerMap,
+                effectiveMacros
+              );
+            } else if (cmd.type === 'apply_macros') {
+              res = await webhidService.applyMacros(effectiveMacros);
+            } else if (cmd.type === 'apply_system') {
+              const sysCfg =
+                freshProf?.systemSettings ?? latestStateRef.current.systemSettings;
+              res = await webhidService.applySystemSettings(sysCfg);
+            } else if (cmd.type === 'apply_mouse') {
+              const mouseCfg = freshProf?.mouseConfig ?? latestStateRef.current.mouseConfig;
+              res = await webhidService.applyMouseConfig(mouseCfg);
+            } else if (cmd.type === 'sync_time') {
+              res = await webhidService.syncTime(new Date());
+            } else if (cmd.type === 'reset_keys') {
+              res = await webhidService.factoryResetHardware(false);
+            } else if (cmd.type === 'factory_reset') {
+              res = await webhidService.factoryResetHardware(true);
+            }
+
+            await completeRemoteCommand(
+              cloudSessionUid,
+              cmd.commandId,
+              res.ok ? 'completed' : 'failed',
+              res.message
+            );
+            showToast(`Điều khiển từ xa: ${res.message}`);
+          } catch (err: any) {
+            await completeRemoteCommand(
+              cloudSessionUid,
+              cmd.commandId,
+              'failed',
+              err?.message || 'Lỗi thực thi lệnh WebHID'
+            ).catch(() => {});
+          }
+          continue;
+        }
+
+        // Prune old completed/failed commands (> 20s) from PC side
+        if (
+          cmd.status !== 'pending' &&
+          webhidService.isConnected() &&
+          cmd.createdAtMs &&
+          Date.now() - cmd.createdAtMs > 20000
+        ) {
+          cleanupRemoteCommand(cloudSessionUid, cmd.commandId).catch(() => {});
+        }
+      }
+    });
+
+    return () => unsubCmds();
+  }, [cloudSessionUid, isConnected]);
+
+  // Debounced auto-save active device profile to Firestore (300ms for snappy Phone -> PC sync)
   useEffect(() => {
     if (!cloudSessionUid) return;
     const comboKey = `${cloudSessionUid}:${selectedDevice.id}:p${activeProfile}`;
@@ -595,20 +1002,21 @@ export default function App() {
       return;
     }
 
-    const payload = {
+    const payload: CloudDeviceProfile = {
       keymaps,
       lighting,
       systemSettings,
       mouseConfig,
       screenSettings: extractCloudScreenSettings(screenConfig),
     };
-    const nextSig = JSON.stringify(payload);
+    const nextSig = stableStringify(payload);
     if (nextSig === lastCloudProfileSigRef.current) return;
 
     const timer = setTimeout(async () => {
       setCloudSyncStatus('syncing');
       try {
         lastCloudProfileSigRef.current = nextSig;
+        lastAppliedHwProfileRef.current = payload;
         await saveDeviceProfileToCloud(
           cloudSessionUid,
           selectedDevice.id,
@@ -621,7 +1029,7 @@ export default function App() {
         console.error('Auto-save profile failed:', err);
         setCloudSyncStatus('error');
       }
-    }, 700);
+    }, 300);
 
     return () => clearTimeout(timer);
   }, [
@@ -647,7 +1055,7 @@ export default function App() {
       return;
     }
 
-    const nextSig = JSON.stringify(macros);
+    const nextSig = stableStringify(macros);
     if (nextSig === lastCloudMacrosSigRef.current) return;
 
     const timer = setTimeout(async () => {
@@ -661,15 +1069,29 @@ export default function App() {
         console.error('Auto-save macros failed:', err);
         setCloudSyncStatus('error');
       }
-    }, 700);
+    }, 300);
 
     return () => clearTimeout(timer);
   }, [cloudSessionUid, macros]);
 
   // Debounced auto-save user preferences (device, profile, language)
   useEffect(() => {
-    if (!cloudSessionUid || prefsHydratedUidRef.current !== cloudSessionUid) return;
+    if (
+      !cloudSessionUid ||
+      prefsHydratedUidRef.current !== cloudSessionUid ||
+      isHydratingPrefsRef.current
+    ) {
+      return;
+    }
+    const nextSig = stableStringify({
+      selectedDeviceId: selectedDevice.id,
+      activeProfile,
+      lang,
+    });
+    if (nextSig === lastCloudPrefsSigRef.current) return;
+
     const timer = setTimeout(() => {
+      lastCloudPrefsSigRef.current = nextSig;
       updateUserPreferences(cloudSessionUid, {
         selectedDeviceId: selectedDevice.id,
         activeProfile,
@@ -677,7 +1099,7 @@ export default function App() {
       }).catch((err) => {
         console.error('Preference update failed:', err);
       });
-    }, 500);
+    }, 250);
 
     return () => clearTimeout(timer);
   }, [cloudSessionUid, selectedDevice.id, activeProfile, lang]);
@@ -791,40 +1213,115 @@ export default function App() {
     showToast('Đã ngắt kết nối phần cứng WebHID.');
   };
 
-  // Key Remap Action (writes real HID scancode / full Aula04 576B keymap table over WebHID)
+  // Helper to flush current state to Firebase and dispatch a remote command to the PC WebHID bridge
+  const sendCommandFromRemote = async (
+    type: RemoteCommandType,
+    override?: {
+      keymaps?: Record<number, Record<string, KeyRemapAction>>;
+      mouseConfig?: MouseConfig;
+      layer?: number;
+    }
+  ) => {
+    if (!cloudSessionUid) {
+      showToast('Chưa kết nối thiết bị WebHID thật! Hãy kết nối bàn phím/chuột hoặc đăng nhập Google.');
+      return;
+    }
+
+    setCloudSyncStatus('syncing');
+    try {
+      const st = latestStateRef.current;
+      const profilePayload: CloudDeviceProfile = {
+        keymaps: override?.keymaps ?? st.keymaps,
+        lighting: st.lighting,
+        systemSettings: st.systemSettings,
+        mouseConfig: override?.mouseConfig ?? st.mouseConfig,
+        screenSettings: extractCloudScreenSettings(st.screenConfig),
+      };
+      lastCloudProfileSigRef.current = stableStringify(profilePayload);
+      lastCloudMacrosSigRef.current = stableStringify(st.macros);
+
+      await Promise.all([
+        saveDeviceProfileToCloud(
+          cloudSessionUid,
+          st.selectedDevice.id,
+          st.activeProfile,
+          profilePayload
+        ),
+        syncUserMacrosToCloud(cloudSessionUid, st.macros),
+      ]);
+
+      const cmdId = await dispatchRemoteCommand(cloudSessionUid, {
+        senderId: clientIdRef.current,
+        type,
+        deviceId: st.selectedDevice.id,
+        profileSlot: st.activeProfile,
+        layer: override?.layer ?? st.activeLayer,
+      });
+      sentCmdIdsRef.current.add(cmdId);
+      setCloudSyncStatus('synced');
+      setLastCloudSavedAt(Date.now());
+
+      showToast(
+        isRemoteBridgeOnline
+          ? `Đã gửi lệnh qua Firebase tới máy tính (${remoteBridge?.productName || st.selectedDevice.name})!`
+          : 'Đã lưu lên Firebase Cloud (máy tính sẽ tự đồng bộ khi mở app & cắm WebHID).'
+      );
+    } catch (err) {
+      console.error('Remote command dispatch failed:', err);
+      setCloudSyncStatus('error');
+      showToast('Lỗi gửi lệnh đồng bộ qua Firebase.');
+    }
+  };
+
+  // Key Remap Action (writes real HID scancode on PC OR syncs remotely via Firebase on Phone)
   const handleRemapKey = async (action: KeyRemapAction | null, targetKey?: KeyDefinition) => {
     const keyToEdit = targetKey ?? selectedKey;
     if (!keyToEdit) return;
 
     if (action) {
-      if (!webhidService.isConnected()) {
-        showToast('Chưa kết nối thiết bị WebHID thật! Hãy kết nối bàn phím trước khi gán phím.');
-        return;
-      }
       const nextLayerMap = {
         ...(keymaps[activeLayer] || {}),
         [keyToEdit.id]: action,
       };
-      const res = await webhidService.applyKeymap(
-        activeLayer,
-        keyToEdit.hwIdx ?? Math.round(keyToEdit.col),
-        action,
-        selectedDevice.keys || [],
-        nextLayerMap,
-        macros
-      );
-      if (!res.ok) {
-        showToast(res.message);
-        return;
-      }
-      setKeymaps((prev) => ({
-        ...prev,
+      const nextKeymaps = {
+        ...keymaps,
         [activeLayer]: nextLayerMap,
-      }));
-      showToast(`Đã ghi thật [${keyToEdit.label}] -> ${action.label}`);
+      };
+
+      if (webhidService.isConnected()) {
+        const res = await webhidService.applyKeymap(
+          activeLayer,
+          keyToEdit.hwIdx ?? Math.round(keyToEdit.col),
+          action,
+          selectedDevice.keys || [],
+          nextLayerMap,
+          macros
+        );
+        if (!res.ok) {
+          showToast(res.message);
+          return;
+        }
+        setKeymaps(nextKeymaps);
+        showToast(`Đã ghi thật [${keyToEdit.label}] -> ${action.label}`);
+      } else if (cloudSessionUid) {
+        setKeymaps(nextKeymaps);
+        await sendCommandFromRemote('apply_keymap', {
+          keymaps: nextKeymaps,
+          layer: activeLayer,
+        });
+      } else {
+        showToast(
+          'Chưa kết nối thiết bị WebHID thật! Hãy cắm bàn phím trên máy tính hoặc đăng nhập Google để điều khiển từ xa.'
+        );
+      }
     } else {
       const nextLayerMap = { ...(keymaps[activeLayer] || {}) };
       delete nextLayerMap[keyToEdit.id];
+      const nextKeymaps = {
+        ...keymaps,
+        [activeLayer]: nextLayerMap,
+      };
+
       if (webhidService.isConnected()) {
         await webhidService.applyKeymap(
           activeLayer,
@@ -834,23 +1331,103 @@ export default function App() {
           nextLayerMap,
           macros
         );
+        setKeymaps(nextKeymaps);
+        showToast(`Đã khôi phục [${keyToEdit.label}] về mặc định`);
+      } else if (cloudSessionUid) {
+        setKeymaps(nextKeymaps);
+        await sendCommandFromRemote('apply_keymap', {
+          keymaps: nextKeymaps,
+          layer: activeLayer,
+        });
+      } else {
+        setKeymaps(nextKeymaps);
+        showToast(`Đã khôi phục [${keyToEdit.label}] về mặc định`);
       }
-      setKeymaps((prev) => ({
-        ...prev,
-        [activeLayer]: nextLayerMap,
-      }));
-      showToast(`Đã khôi phục [${keyToEdit.label}] về mặc định`);
     }
   };
 
-  // Apply Lighting to Real Hardware
+  // Apply Lighting to Real Hardware (or remotely via Firebase Bridge)
   const handleApplyLighting = async () => {
-    if (!webhidService.isConnected()) {
-      showToast('Chưa kết nối thiết bị WebHID thật! Hãy kết nối bàn phím/chuột trước.');
+    if (webhidService.isConnected()) {
+      const res = await webhidService.applyLighting(lighting, selectedDevice.keys || []);
+      showToast(res.ok ? res.message || t('savedNotification') : res.message);
       return;
     }
-    const res = await webhidService.applyLighting(lighting, selectedDevice.keys || []);
-    showToast(res.ok ? res.message || t('savedNotification') : res.message);
+    if (cloudSessionUid) {
+      await sendCommandFromRemote('apply_lighting');
+      return;
+    }
+    showToast('Chưa kết nối thiết bị WebHID thật! Hãy kết nối bàn phím/chuột hoặc đăng nhập Google.');
+  };
+
+  const handleApplyMacrosAction = async () => {
+    if (webhidService.isConnected()) {
+      const res = await webhidService.applyMacros(macros);
+      showToast(res.message);
+      return;
+    }
+    if (cloudSessionUid) {
+      await sendCommandFromRemote('apply_macros');
+      return;
+    }
+    showToast('Vui lòng kết nối thiết bị WebHID thật hoặc đăng nhập Google.');
+  };
+
+  const handleApplySystemAction = async () => {
+    if (webhidService.isConnected()) {
+      const res = await webhidService.applySystemSettings(systemSettings);
+      showToast(res.message);
+      return;
+    }
+    if (cloudSessionUid) {
+      await sendCommandFromRemote('apply_system');
+      return;
+    }
+    showToast('Vui lòng kết nối thiết bị WebHID thật hoặc đăng nhập Google.');
+  };
+
+  const handleHardwareResetAction = async (fullFactory: boolean) => {
+    if (fullFactory) {
+      handleFactoryReset();
+    }
+    if (webhidService.isConnected()) {
+      const res = await webhidService.factoryResetHardware(fullFactory);
+      showToast(res.message);
+      return;
+    }
+    if (cloudSessionUid) {
+      await sendCommandFromRemote(fullFactory ? 'factory_reset' : 'reset_keys');
+      return;
+    }
+    if (!fullFactory) {
+      showToast('Chưa kết nối thiết bị WebHID thật để gửi lệnh Reset Keyboard.');
+    }
+  };
+
+  const handleApplyMouseAction = async (nextMouseCfg: MouseConfig) => {
+    if (webhidService.isConnected()) {
+      const res = await webhidService.applyMouseConfig(nextMouseCfg);
+      showToast(res.message);
+      return;
+    }
+    if (cloudSessionUid) {
+      await sendCommandFromRemote('apply_mouse', { mouseConfig: nextMouseCfg });
+      return;
+    }
+    showToast('Vui lòng kết nối chuột AULA SC620 hoặc đăng nhập Google.');
+  };
+
+  const handleSyncTimeAction = async () => {
+    if (webhidService.isConnected()) {
+      const res = await webhidService.syncTime(new Date());
+      showToast(res.message);
+      return;
+    }
+    if (cloudSessionUid) {
+      await sendCommandFromRemote('sync_time');
+      return;
+    }
+    showToast('Chưa kết nối bàn phím AULA qua WebHID thật hoặc đăng nhập Google.');
   };
 
   // Custom Matrix Painter Key Click & Group Paint
@@ -986,15 +1563,16 @@ export default function App() {
     }
     setCloudSyncStatus('syncing');
     try {
-      const profilePayload = {
+      const profilePayload: CloudDeviceProfile = {
         keymaps,
         lighting,
         systemSettings,
         mouseConfig,
         screenSettings: extractCloudScreenSettings(screenConfig),
       };
-      lastCloudProfileSigRef.current = JSON.stringify(profilePayload);
-      lastCloudMacrosSigRef.current = JSON.stringify(macros);
+      lastCloudProfileSigRef.current = stableStringify(profilePayload);
+      lastCloudMacrosSigRef.current = stableStringify(macros);
+      lastAppliedHwProfileRef.current = profilePayload;
 
       await Promise.all([
         saveDeviceProfileToCloud(
@@ -1114,8 +1692,42 @@ export default function App() {
         onSignOutGoogle={handleSignOutGoogle}
       />
 
-      {/* Real Hardware Status Banner */}
-      {!isConnected && pairedDevices.length > 0 ? (
+      {/* Real Hardware / Firebase Remote Bridge Status Banner */}
+      {isRemoteBridgeOnline ? (
+        <div className="bg-emerald-950/45 border-b border-emerald-700/50 px-4 py-2">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-emerald-200">
+              <Smartphone className="w-4 h-4 text-cyan-300 shrink-0" />
+              <span>
+                {lang === 'vi' ? 'Chế độ điều khiển từ xa qua Firebase:' : 'Firebase Remote Control:'}{' '}
+                <strong className="text-white">
+                  {remoteBridge?.productName || selectedDevice.name}
+                </strong>{' '}
+                <span className="text-emerald-300 font-semibold">
+                  •{' '}
+                  {remoteBridge?.connectionType === 'wireless_2.4g'
+                    ? '2.4GHz'
+                    : remoteBridge?.connectionType === 'wired'
+                    ? 'USB-C'
+                    : 'Online'}
+                  {typeof remoteBridge?.batteryLevel === 'number'
+                    ? ` • Pin ${remoteBridge.batteryLevel}%`
+                    : ''}
+                </span>{' '}
+                <span className="text-slate-300 hidden sm:inline">
+                  — Mọi chỉnh sửa LED, Keymap, Macro, DPI sẽ tự động gửi xuống máy tính.
+                </span>
+              </span>
+            </div>
+            <button
+              onClick={handleManualCloudSync}
+              className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition cursor-pointer"
+            >
+              {lang === 'vi' ? 'Đồng bộ ngay' : 'Sync Now'}
+            </button>
+          </div>
+        </div>
+      ) : !isConnected && pairedDevices.length > 0 ? (
         <div className="bg-cyan-950/40 border-b border-cyan-800/50 px-4 py-2">
           <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
             <div className="flex items-center gap-2 text-cyan-200">
@@ -1142,8 +1754,9 @@ export default function App() {
             <div className="flex items-center gap-2 text-amber-200">
               <Usb className="w-4 h-4 text-amber-400" />
               <span>
-                Chế độ phần cứng thật (không giả lập): Hãy cắm cáp USB-C hoặc đầu thu 2.4GHz và bấm{' '}
-                <strong>Kết nối thiết bị WebHID</strong> để điều khiển bàn phím/chuột thật.
+                {cloudSessionUid
+                  ? 'Trên máy tính: bấm Kết nối thiết bị WebHID để làm cầu nối. Trên điện thoại: chỉnh trực tiếp để đồng bộ qua Firebase.'
+                  : 'Chế độ phần cứng thật: cắm cáp USB-C / 2.4GHz trên máy tính để kết nối WebHID, hoặc đăng nhập Google để điều khiển đồng bộ từ điện thoại.'}
               </span>
             </div>
             <button
@@ -1320,6 +1933,7 @@ export default function App() {
               <MacroTab
                 macros={macros}
                 onUpdateMacros={setMacros}
+                onApplyMacros={handleApplyMacrosAction}
                 onNotify={showToast}
                 lang={lang}
                 t={t}
@@ -1334,6 +1948,7 @@ export default function App() {
                 deviceInfo={deviceInfo}
                 isConnected={isConnected}
                 onRequestHIDConnect={() => handleConnectHID(false)}
+                onSyncTime={handleSyncTimeAction}
                 onChangeConfig={setScreenConfig}
                 onNotify={showToast}
                 lang={lang}
@@ -1345,6 +1960,7 @@ export default function App() {
               <MouseTab
                 config={mouseConfig}
                 onChangeConfig={setMouseConfig}
+                onApplyMouse={handleApplyMouseAction}
                 onNotify={showToast}
                 lang={lang}
                 t={t}
@@ -1365,6 +1981,8 @@ export default function App() {
               <SystemTab
                 settings={systemSettings}
                 onChangeSettings={setSystemSettings}
+                onApplySettings={handleApplySystemAction}
+                onHardwareReset={handleHardwareResetAction}
                 onFactoryResetLocal={handleFactoryReset}
                 onNotify={showToast}
                 lang={lang}
@@ -1499,6 +2117,37 @@ export default function App() {
                       {firebaseUser.email || ''}
                     </div>
                   </div>
+                </div>
+
+                <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-2.5 flex items-center gap-2 text-[11px]">
+                  {isConnected ? (
+                    <>
+                      <Monitor className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span className="text-emerald-300 font-semibold leading-snug">
+                        {lang === 'vi'
+                          ? 'Máy tính đang làm cầu nối WebHID cho điện thoại'
+                          : 'PC WebHID bridge active for mobile control'}
+                      </span>
+                    </>
+                  ) : isRemoteBridgeOnline ? (
+                    <>
+                      <Smartphone className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      <span className="text-cyan-300 font-semibold leading-snug">
+                        {lang === 'vi'
+                          ? `Đang điều khiển máy tính: ${remoteBridge?.productName}`
+                          : `Controlling PC: ${remoteBridge?.productName}`}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Cloud className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span className="text-slate-400 leading-snug">
+                        {lang === 'vi'
+                          ? 'Đang chờ máy tính mở web & cắm WebHID'
+                          : 'Waiting for PC WebHID host'}
+                      </span>
+                    </>
+                  )}
                 </div>
 
                 <p className="text-[11px] text-slate-400 leading-relaxed">

@@ -154,6 +154,120 @@
         }
       },
       "required": ["ownerId", "macroId", "name", "repeatMode", "actions", "createdAt", "updatedAt"]
+    },
+    "BridgeStatus": {
+      "title": "PC Hardware Bridge Status",
+      "description": "Live status of the desktop WebHID host connected to the physical AULA keyboard or mouse.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "online": {
+          "type": "boolean"
+        },
+        "hidConnected": {
+          "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "productName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "connectionType": {
+          "type": "string",
+          "enum": ["wired", "wireless_2.4g", "bluetooth", "disconnected"],
+          "maxLength": 24
+        },
+        "batteryLevel": {
+          "type": "number"
+        },
+        "clientHostId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "online", "hidConnected", "deviceId", "productName", "connectionType", "clientHostId", "createdAt", "updatedAt"]
+    },
+    "RemoteCommand": {
+      "title": "Remote Hardware Command",
+      "description": "Remote execution command dispatched from mobile/secondary client to the PC WebHID bridge.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "commandId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "senderId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "apply_lighting",
+            "apply_keymap",
+            "apply_macros",
+            "apply_system",
+            "apply_mouse",
+            "sync_time",
+            "reset_keys",
+            "factory_reset"
+          ],
+          "maxLength": 32
+        },
+        "deviceId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "profileSlot": {
+          "type": "integer"
+        },
+        "layer": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "completed", "failed"],
+          "maxLength": 16
+        },
+        "resultMessage": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "commandId", "senderId", "type", "deviceId", "profileSlot", "status", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -172,6 +286,14 @@
     "/users/{userId}/macros/{macroId}": {
       "schema": { "$ref": "#/entities/SavedMacro" },
       "description": "Custom keyboard & mouse macro sequences belonging to the signed-in user."
+    },
+    "/users/{userId}/bridge/{docId}": {
+      "schema": { "$ref": "#/entities/BridgeStatus" },
+      "description": "Live desktop WebHID host connection state for remote phone control."
+    },
+    "/users/{userId}/commands/{commandId}": {
+      "schema": { "$ref": "#/entities/RemoteCommand" },
+      "description": "Remote hardware command queue executed by the signed-in user's PC WebHID bridge."
     }
   }
 }

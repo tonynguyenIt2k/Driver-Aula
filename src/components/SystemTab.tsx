@@ -6,6 +6,8 @@ import { webhidService } from '../services/webhid';
 interface SystemTabProps {
   settings: SystemSettings;
   onChangeSettings: (next: SystemSettings) => void;
+  onApplySettings?: () => Promise<void> | void;
+  onHardwareReset?: (fullFactory: boolean) => Promise<void> | void;
   onFactoryResetLocal: () => void;
   onNotify?: (msg: string) => void;
   lang: Language;
@@ -14,16 +16,26 @@ interface SystemTabProps {
 export const SystemTab: React.FC<SystemTabProps> = ({
   settings,
   onChangeSettings,
+  onApplySettings,
+  onHardwareReset,
   onFactoryResetLocal,
   onNotify,
   lang,
 }) => {
   const handleApply = async () => {
+    if (onApplySettings) {
+      await onApplySettings();
+      return;
+    }
     const res = await webhidService.applySystemSettings(settings);
     onNotify?.(res.message);
   };
 
   const handleHardwareReset = async (fullFactory: boolean) => {
+    if (onHardwareReset) {
+      await onHardwareReset(fullFactory);
+      return;
+    }
     if (fullFactory) {
       onFactoryResetLocal();
     }

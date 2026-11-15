@@ -14,6 +14,7 @@ import { webhidService } from '../services/webhid';
 interface MouseTabProps {
   config: MouseConfig;
   onChangeConfig: (newConfig: MouseConfig) => void;
+  onApplyMouse?: (nextConfig: MouseConfig) => Promise<void> | void;
   onNotify?: (msg: string) => void;
   lang: Language;
   t: (key: string) => string;
@@ -22,11 +23,16 @@ interface MouseTabProps {
 export const MouseTab: React.FC<MouseTabProps> = ({
   config,
   onChangeConfig,
+  onApplyMouse,
   onNotify,
   lang,
   t,
 }) => {
   const handleApplyToMouse = async (nextConfig: MouseConfig) => {
+    if (onApplyMouse) {
+      await onApplyMouse(nextConfig);
+      return;
+    }
     const res = await webhidService.applyMouseConfig(nextConfig);
     onNotify?.(res.message);
   };

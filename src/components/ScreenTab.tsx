@@ -36,6 +36,7 @@ interface ScreenTabProps {
   deviceInfo?: ConnectedDeviceInfo;
   isConnected?: boolean;
   onRequestHIDConnect?: () => void;
+  onSyncTime?: () => Promise<void> | void;
   onChangeConfig: (newConfig: ScreenConfig) => void;
   onNotify?: (msg: string) => void;
   lang: Language;
@@ -89,6 +90,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
   deviceInfo,
   isConnected,
   onRequestHIDConnect,
+  onSyncTime,
   onChangeConfig,
   onNotify,
   t,
@@ -419,6 +421,10 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
 
   const handleSyncTime = async () => {
     setUploadError(null);
+    if (onSyncTime) {
+      await onSyncTime();
+      return;
+    }
     const res = await webhidService.syncTime(new Date());
     if (!res.ok) {
       setUploadError(res.message);

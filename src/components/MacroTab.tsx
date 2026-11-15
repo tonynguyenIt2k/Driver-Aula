@@ -18,6 +18,7 @@ import { webhidService } from '../services/webhid';
 interface MacroTabProps {
   macros: Macro[];
   onUpdateMacros: (macros: Macro[]) => void;
+  onApplyMacros?: () => Promise<void> | void;
   onNotify?: (msg: string) => void;
   lang: Language;
   t: (key: string) => string;
@@ -26,6 +27,7 @@ interface MacroTabProps {
 export const MacroTab: React.FC<MacroTabProps> = ({
   macros,
   onUpdateMacros,
+  onApplyMacros,
   onNotify,
   lang,
   t,
@@ -43,9 +45,16 @@ export const MacroTab: React.FC<MacroTabProps> = ({
 
   const handleApplyMacrosToHardware = async () => {
     setIsApplyingHw(true);
-    const res = await webhidService.applyMacros(macros);
-    setIsApplyingHw(false);
-    onNotify?.(res.message);
+    try {
+      if (onApplyMacros) {
+        await onApplyMacros();
+      } else {
+        const res = await webhidService.applyMacros(macros);
+        onNotify?.(res.message);
+      }
+    } finally {
+      setIsApplyingHw(false);
+    }
   };
 
   // Live Keystroke Recorder listener

@@ -6,6 +6,7 @@ import {
 import {
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -16,6 +17,7 @@ import {
   updateDoc,
   where,
   Unsubscribe,
+  Timestamp,
 } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../firebase';
 import {
@@ -108,13 +110,19 @@ function sanitizeId(raw: string, maxLen = 128): string {
   return cleaned || 'item';
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 function stripUndefined<T>(value: T): T {
   if (Array.isArray(value)) {
     return value.map((item) => stripUndefined(item)) as unknown as T;
   }
-  if (value && typeof value === 'object') {
+  if (isPlainObject(value)) {
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    for (const [k, v] of Object.entries(value)) {
       if (v !== undefined) {
         out[k] = stripUndefined(v);
       }
@@ -177,27 +185,40 @@ export async function ensureUserDocuments(
 ): Promise<CloudUserPreferences> {
   const userPath = `users/${user.uid}`;
   const userRef = doc(db, 'users', user.uid);
-  const displayName = (user.displayName || user.email?.split('@')[0] || 'AULA User').slice(0, 120);
-  const photoUrl = user.photoURL ? user.photoURL.slice(0, 512) : undefined;
+  const displayName =
+    (user.displayName || user.email?.split('@')[0] || 'AULA User').trim().slice(0, 120) ||
+    'AULA User';
+  const photoUrl =
+    user.photoURL && user.photoURL.trim().length > 0
+      ? user.photoURL.trim().slice(0, 512)
+      : undefined;
+  const safeActiveProfile =
+    typeof fallbackPrefs.activeProfile === 'number' &&
+    Number.isFinite(fallbackPrefs.activeProfile)
+      ? Math.max(1, Math.min(3, Math.round(fallbackPrefs.activeProfile)))
+      : 1;
+  const safeLang: Language = fallbackPrefs.lang === 'en' ? 'en' : 'vi';
 
   let savedPrefs: CloudUserPreferences = { ...fallbackPrefs };
 
   try {
     const snap = await getDoc(userRef);
     if (!snap.exists()) {
-      const createPayload = stripUndefined({
-        uid: user.uid,
-        displayName,
+      const optionalCreateFields = stripUndefined({
         photoUrl,
         selectedDeviceId: fallbackPrefs.selectedDeviceId
           ? sanitizeId(fallbackPrefs.selectedDeviceId, 64)
           : undefined,
-        activeProfile: fallbackPrefs.activeProfile ?? 1,
-        lang: fallbackPrefs.lang ?? 'vi',
+      });
+      await setDoc(userRef, {
+        uid: user.uid,
+        displayName,
+        ...optionalCreateFields,
+        activeProfile: safeActiveProfile,
+        lang: safeLang,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      await setDoc(userRef, createPayload);
     } else {
       const data = snap.data();
       savedPrefs = {
@@ -211,14 +232,14 @@ export async function ensureUserDocuments(
             : fallbackPrefs.activeProfile,
         lang: data.lang === 'en' || data.lang === 'vi' ? data.lang : fallbackPrefs.lang,
       };
-      await updateDoc(
-        userRef,
-        stripUndefined({
-          displayName,
-          photoUrl,
-          updatedAt: serverTimestamp(),
-        })
-      );
+      const updateFields = stripUndefined({
+        displayName,
+        photoUrl,
+      });
+      await updateDoc(userRef, {
+        ...updateFields,
+        updatedAt: serverTimestamp(),
+      });
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, userPath);
@@ -255,18 +276,24 @@ export async function updateUserPreferences(
   prefs: CloudUserPreferences
 ): Promise<void> {
   const path = `users/${uid}`;
+  const cleanActiveProfile =
+    typeof prefs.activeProfile === 'number' && Number.isFinite(prefs.activeProfile)
+      ? Math.max(1, Math.min(3, Math.round(prefs.activeProfile)))
+      : undefined;
+  const cleanLang =
+    prefs.lang === 'en' || prefs.lang === 'vi' ? prefs.lang : undefined;
   try {
-    await updateDoc(
-      doc(db, 'users', uid),
-      stripUndefined({
-        selectedDeviceId: prefs.selectedDeviceId
-          ? sanitizeId(prefs.selectedDeviceId, 64)
-          : undefined,
-        activeProfile: prefs.activeProfile,
-        lang: prefs.lang,
-        updatedAt: serverTimestamp(),
-      })
-    );
+    const cleanPrefs = stripUndefined({
+      selectedDeviceId: prefs.selectedDeviceId
+        ? sanitizeId(prefs.selectedDeviceId, 64)
+        : undefined,
+      activeProfile: cleanActiveProfile,
+      lang: cleanLang,
+    });
+    await updateDoc(doc(db, 'users', uid), {
+      ...cleanPrefs,
+      updatedAt: serverTimestamp(),
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
@@ -468,5 +495,276 @@ export async function syncUserMacrosToCloud(uid: string, macros: Macro[]): Promi
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => stableStringify(v)).join(',')}]`;
+  }
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj)
+    .filter((k) => obj[k] !== undefined)
+    .sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`;
+}
+
+export function subscribeUserPreferences(
+  uid: string,
+  onData: (prefs: CloudUserPreferences) => void
+): Unsubscribe {
+  const path = `users/${uid}`;
+  return onSnapshot(
+    doc(db, 'users', uid),
+    (snap) => {
+      if (!snap.exists()) return;
+      const data = snap.data();
+      onData({
+        selectedDeviceId:
+          typeof data.selectedDeviceId === 'string' ? data.selectedDeviceId : undefined,
+        activeProfile:
+          typeof data.activeProfile === 'number' ? data.activeProfile : undefined,
+        lang: data.lang === 'en' || data.lang === 'vi' ? data.lang : undefined,
+      });
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, path);
+    }
+  );
+}
+
+export interface CloudBridgeStatus {
+  online: boolean;
+  hidConnected: boolean;
+  deviceId: string;
+  productName: string;
+  connectionType: 'wired' | 'wireless_2.4g' | 'bluetooth' | 'disconnected';
+  batteryLevel?: number | null;
+  clientHostId: string;
+  updatedAtMs?: number;
+}
+
+export async function publishBridgeStatus(
+  uid: string,
+  status: CloudBridgeStatus
+): Promise<void> {
+  const path = `users/${uid}/bridge/status`;
+  const ref = doc(db, 'users', uid, 'bridge', 'status');
+  const safeDeviceId = sanitizeId(status.deviceId || 'aula-s75-pro', 64);
+  const safeHostId = sanitizeId(status.clientHostId || 'host', 64);
+  const safeProduct = (status.productName || 'AULA Device').trim().slice(0, 120) || 'AULA Device';
+  const safeConn =
+    status.connectionType === 'wired' ||
+    status.connectionType === 'wireless_2.4g' ||
+    status.connectionType === 'bluetooth'
+      ? status.connectionType
+      : 'disconnected';
+  const hasBattery =
+    typeof status.batteryLevel === 'number' &&
+    Number.isFinite(status.batteryLevel) &&
+    status.batteryLevel >= 0 &&
+    status.batteryLevel <= 100;
+
+  try {
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      const optionalFields = stripUndefined({
+        batteryLevel: hasBattery ? Math.round(status.batteryLevel!) : undefined,
+      });
+      await setDoc(ref, {
+        ownerId: uid,
+        online: Boolean(status.online),
+        hidConnected: Boolean(status.hidConnected),
+        deviceId: safeDeviceId,
+        productName: safeProduct,
+        connectionType: safeConn,
+        ...optionalFields,
+        clientHostId: safeHostId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await updateDoc(ref, {
+        online: Boolean(status.online),
+        hidConnected: Boolean(status.hidConnected),
+        deviceId: safeDeviceId,
+        productName: safeProduct,
+        connectionType: safeConn,
+        batteryLevel: hasBattery ? Math.round(status.batteryLevel!) : deleteField(),
+        clientHostId: safeHostId,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export function subscribeBridgeStatus(
+  uid: string,
+  onData: (status: CloudBridgeStatus | null) => void
+): Unsubscribe {
+  const path = `users/${uid}/bridge/status`;
+  const ref = doc(db, 'users', uid, 'bridge', 'status');
+  return onSnapshot(
+    ref,
+    (snap) => {
+      if (!snap.exists()) {
+        onData(null);
+        return;
+      }
+      const data = snap.data();
+      const ts = data.updatedAt as Timestamp | undefined;
+      onData({
+        online: Boolean(data.online),
+        hidConnected: Boolean(data.hidConnected),
+        deviceId: typeof data.deviceId === 'string' ? data.deviceId : 'aula-s75-pro',
+        productName: typeof data.productName === 'string' ? data.productName : 'AULA Device',
+        connectionType:
+          data.connectionType === 'wired' ||
+          data.connectionType === 'wireless_2.4g' ||
+          data.connectionType === 'bluetooth'
+            ? data.connectionType
+            : 'disconnected',
+        batteryLevel: typeof data.batteryLevel === 'number' ? data.batteryLevel : null,
+        clientHostId: typeof data.clientHostId === 'string' ? data.clientHostId : '',
+        updatedAtMs: ts && typeof ts.toMillis === 'function' ? ts.toMillis() : undefined,
+      });
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, path);
+    }
+  );
+}
+
+export type RemoteCommandType =
+  | 'apply_lighting'
+  | 'apply_keymap'
+  | 'apply_macros'
+  | 'apply_system'
+  | 'apply_mouse'
+  | 'sync_time'
+  | 'reset_keys'
+  | 'factory_reset';
+
+export interface RemoteCommandRecord {
+  commandId: string;
+  senderId: string;
+  type: RemoteCommandType;
+  deviceId: string;
+  profileSlot: number;
+  layer?: number;
+  status: 'pending' | 'completed' | 'failed';
+  resultMessage?: string;
+  createdAtMs?: number;
+}
+
+export async function dispatchRemoteCommand(
+  uid: string,
+  params: {
+    senderId: string;
+    type: RemoteCommandType;
+    deviceId: string;
+    profileSlot: number;
+    layer?: number;
+  }
+): Promise<string> {
+  const commandId = sanitizeId(`cmd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, 128);
+  const path = `users/${uid}/commands/${commandId}`;
+  const ref = doc(db, 'users', uid, 'commands', commandId);
+  const slot = Math.max(1, Math.min(3, Math.round(params.profileSlot || 1)));
+  const cleanLayer =
+    typeof params.layer === 'number'
+      ? Math.max(0, Math.min(3, Math.round(params.layer)))
+      : undefined;
+
+  try {
+    const optionalFields = stripUndefined({
+      layer: cleanLayer,
+    });
+    await setDoc(ref, {
+      ownerId: uid,
+      commandId,
+      senderId: sanitizeId(params.senderId, 64),
+      type: params.type,
+      deviceId: sanitizeId(params.deviceId, 64),
+      profileSlot: slot,
+      ...optionalFields,
+      status: 'pending',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return commandId;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export function subscribeRemoteCommands(
+  uid: string,
+  onData: (commands: RemoteCommandRecord[]) => void
+): Unsubscribe {
+  const path = `users/${uid}/commands`;
+  const q = query(collection(db, 'users', uid, 'commands'), where('ownerId', '==', uid));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const items: RemoteCommandRecord[] = snap.docs.map((d) => {
+        const data = d.data();
+        const ts = data.createdAt as Timestamp | undefined;
+        return {
+          commandId: d.id,
+          senderId: typeof data.senderId === 'string' ? data.senderId : '',
+          type: data.type as RemoteCommandType,
+          deviceId: typeof data.deviceId === 'string' ? data.deviceId : 'aula-s75-pro',
+          profileSlot: typeof data.profileSlot === 'number' ? data.profileSlot : 1,
+          layer: typeof data.layer === 'number' ? data.layer : undefined,
+          status:
+            data.status === 'completed' || data.status === 'failed'
+              ? data.status
+              : 'pending',
+          resultMessage:
+            typeof data.resultMessage === 'string' ? data.resultMessage : undefined,
+          createdAtMs: ts && typeof ts.toMillis === 'function' ? ts.toMillis() : Date.now(),
+        };
+      });
+      items.sort((a, b) => (a.createdAtMs || 0) - (b.createdAtMs || 0));
+      onData(items);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  );
+}
+
+export async function completeRemoteCommand(
+  uid: string,
+  commandId: string,
+  status: 'completed' | 'failed',
+  resultMessage: string
+): Promise<void> {
+  const safeId = sanitizeId(commandId, 128);
+  const path = `users/${uid}/commands/${safeId}`;
+  try {
+    await updateDoc(doc(db, 'users', uid, 'commands', safeId), {
+      status,
+      resultMessage: (resultMessage || status).slice(0, 300),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function cleanupRemoteCommand(uid: string, commandId: string): Promise<void> {
+  const safeId = sanitizeId(commandId, 128);
+  const path = `users/${uid}/commands/${safeId}`;
+  try {
+    await deleteDoc(doc(db, 'users', uid, 'commands', safeId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }

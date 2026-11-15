@@ -79,6 +79,46 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidBridgeStatus(data, userId) {
+      return data.keys().hasAll(['ownerId', 'online', 'hidConnected', 'deviceId', 'productName', 'connectionType', 'clientHostId', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'online', 'hidConnected', 'deviceId', 'productName', 'connectionType', 'batteryLevel', 'clientHostId', 'createdAt', 'updatedAt'])
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId == userId && data.ownerId == request.auth.uid
+        && data.online is bool
+        && data.hidConnected is bool
+        && data.deviceId is string && data.deviceId.size() >= 1 && data.deviceId.size() <= 64 && data.deviceId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.productName is string && data.productName.size() >= 1 && data.productName.size() <= 120
+        && data.connectionType is string && data.connectionType.size() <= 24 && (data.connectionType == 'wired' || data.connectionType == 'wireless_2.4g' || data.connectionType == 'bluetooth' || data.connectionType == 'disconnected')
+        && (!('batteryLevel' in data) || (data.batteryLevel is number && data.batteryLevel >= 0 && data.batteryLevel <= 100))
+        && data.clientHostId is string && data.clientHostId.size() >= 1 && data.clientHostId.size() <= 64 && data.clientHostId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRemoteCommand(data, userId, commandId) {
+      return data.keys().hasAll(['ownerId', 'commandId', 'senderId', 'type', 'deviceId', 'profileSlot', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'commandId', 'senderId', 'type', 'deviceId', 'profileSlot', 'layer', 'status', 'resultMessage', 'createdAt', 'updatedAt'])
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId == userId && data.ownerId == request.auth.uid
+        && data.commandId is string && data.commandId.size() >= 1 && data.commandId.size() <= 128 && data.commandId == commandId
+        && data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 64 && data.senderId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.type is string && data.type.size() <= 32 && (
+          data.type == 'apply_lighting'
+          || data.type == 'apply_keymap'
+          || data.type == 'apply_macros'
+          || data.type == 'apply_system'
+          || data.type == 'apply_mouse'
+          || data.type == 'sync_time'
+          || data.type == 'reset_keys'
+          || data.type == 'factory_reset'
+        )
+        && data.deviceId is string && data.deviceId.size() >= 1 && data.deviceId.size() <= 64 && data.deviceId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.profileSlot is int && data.profileSlot >= 1 && data.profileSlot <= 3
+        && (!('layer' in data) || (data.layer is int && data.layer >= 0 && data.layer <= 3))
+        && data.status is string && data.status.size() <= 16 && (data.status == 'pending' || data.status == 'completed' || data.status == 'failed')
+        && (!('resultMessage' in data) || (data.resultMessage is string && data.resultMessage.size() <= 300))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     match /users/{userId} {
       allow get: if isValidId(userId) && isOwner(userId);
       allow list: if false;
@@ -163,6 +203,58 @@ service cloud.firestore {
           && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'repeatMode', 'actions', 'clientCreatedAt', 'updatedAt'])
           && exists(/databases/$(database)/documents/users/$(userId));
         allow delete: if isValidId(userId) && isValidId(macroId) && isVerifiedOwner(userId);
+      }
+
+      match /bridge/{docId} {
+        allow get: if isValidId(userId) && docId == 'status' && isOwner(userId);
+        allow list: if false;
+        allow create: if isValidId(userId)
+          && docId == 'status'
+          && isVerifiedOwner(userId)
+          && isValidBridgeStatus(incoming(), userId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow update: if isValidId(userId)
+          && docId == 'status'
+          && isVerifiedOwner(userId)
+          && isValidBridgeStatus(incoming(), userId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['online', 'hidConnected', 'deviceId', 'productName', 'connectionType', 'batteryLevel', 'clientHostId', 'updatedAt'])
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow delete: if isValidId(userId) && docId == 'status' && isVerifiedOwner(userId);
+      }
+
+      match /commands/{commandId} {
+        allow get: if isValidId(userId) && isValidId(commandId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(userId)
+          && isValidId(commandId)
+          && isVerifiedOwner(userId)
+          && isValidRemoteCommand(incoming(), userId, commandId)
+          && incoming().status == 'pending'
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow update: if isValidId(userId)
+          && isValidId(commandId)
+          && isVerifiedOwner(userId)
+          && isValidRemoteCommand(incoming(), userId, commandId)
+          && existing().status == 'pending'
+          && (incoming().status == 'completed' || incoming().status == 'failed')
+          && incoming().ownerId == existing().ownerId
+          && incoming().commandId == existing().commandId
+          && incoming().senderId == existing().senderId
+          && incoming().type == existing().type
+          && incoming().deviceId == existing().deviceId
+          && incoming().profileSlot == existing().profileSlot
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'resultMessage', 'updatedAt'])
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow delete: if isValidId(userId) && isValidId(commandId) && isVerifiedOwner(userId);
       }
     }
   }
