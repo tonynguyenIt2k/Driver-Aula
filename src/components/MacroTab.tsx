@@ -252,7 +252,7 @@ export const MacroTab: React.FC<MacroTabProps> = ({
         {/* Selected Macro Editor & Timeline */}
         <div className="lg:col-span-2 flex flex-col gap-5">
           {selectedMacro ? (
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col gap-5">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 sm:p-5 flex flex-col gap-4 sm:gap-5">
               {/* Top controls of selected macro */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 border-b border-slate-800 pb-4">
                 <div className="flex items-center gap-3 min-w-0">

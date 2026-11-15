@@ -1758,21 +1758,21 @@ export default function App() {
   const navTabs = [
     ...(selectedDevice.type === 'keyboard'
       ? [
-          { id: 'keymap', name: t('tabKeymap'), icon: Layers },
-          { id: 'lighting', name: t('tabLighting'), icon: Sparkles },
-          { id: 'macro', name: t('tabMacro'), icon: Activity },
+          { id: 'keymap', name: t('tabKeymap'), shortName: lang === 'vi' ? 'Gán phím' : 'Keymap', icon: Layers },
+          { id: 'lighting', name: t('tabLighting'), shortName: 'LED RGB', icon: Sparkles },
+          { id: 'macro', name: t('tabMacro'), shortName: 'Macro', icon: Activity },
           ...(selectedDevice.hasScreen
-            ? [{ id: 'screen', name: t('tabScreen'), icon: Tv }]
+            ? [{ id: 'screen', name: t('tabScreen'), shortName: lang === 'vi' ? 'Màn hình' : 'Screen', icon: Tv }]
             : []),
-          { id: 'tester', name: t('tabKeyTester'), icon: KeyboardIcon },
-          { id: 'system', name: t('tabSystem'), icon: Settings },
+          { id: 'tester', name: t('tabKeyTester'), shortName: lang === 'vi' ? 'Test phím' : 'Tester', icon: KeyboardIcon },
+          { id: 'system', name: t('tabSystem'), shortName: lang === 'vi' ? 'Hệ thống' : 'System', icon: Settings },
         ]
       : [
-          { id: 'mouse', name: t('tabMouse'), icon: MouseIcon },
-          { id: 'lighting', name: t('tabLighting'), icon: Sparkles },
-          { id: 'macro', name: t('tabMacro'), icon: Activity },
+          { id: 'mouse', name: t('tabMouse'), shortName: lang === 'vi' ? 'Chuột' : 'Mouse', icon: MouseIcon },
+          { id: 'lighting', name: t('tabLighting'), shortName: 'LED RGB', icon: Sparkles },
+          { id: 'macro', name: t('tabMacro'), shortName: 'Macro', icon: Activity },
         ]),
-    { id: 'packets', name: t('tabPackets'), icon: Terminal },
+    { id: 'packets', name: t('tabPackets'), shortName: lang === 'vi' ? 'Nhật ký' : 'Packets', icon: Terminal },
   ];
 
   return (
@@ -2351,7 +2351,7 @@ export default function App() {
         aria-label="Mobile workspace navigation"
         className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-slate-950/95 backdrop-blur-lg border-t border-slate-800/90 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_28px_rgba(0,0,0,0.65)]"
       >
-        <div className="flex items-stretch overflow-x-auto no-scrollbar px-1.5 py-1 gap-1">
+        <div className="flex items-stretch overflow-x-auto no-scrollbar px-2 py-1.5 gap-1.5">
           {navTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -2359,7 +2359,7 @@ export default function App() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`relative flex-1 min-w-[70px] min-h-[50px] px-2 py-1 rounded-xl flex flex-col items-center justify-center gap-1 transition cursor-pointer whitespace-nowrap shrink-0 ${
+                className={`relative flex-none min-w-[72px] sm:flex-1 min-h-[50px] px-2 py-1.5 rounded-xl flex flex-col items-center justify-center gap-1 transition cursor-pointer overflow-hidden ${
                   isActive
                     ? 'bg-cyan-500/15 text-cyan-300'
                     : 'text-slate-400 active:bg-slate-800/70'
@@ -2373,8 +2373,8 @@ export default function App() {
                     isActive ? 'text-cyan-400' : 'text-slate-400'
                   }`}
                 />
-                <span className="text-[10px] font-semibold leading-none tracking-tight">
-                  {tab.name}
+                <span className="w-full text-center truncate text-[10.5px] font-semibold leading-tight tracking-tight">
+                  {tab.shortName}
                 </span>
               </button>
             );

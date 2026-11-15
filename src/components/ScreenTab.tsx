@@ -657,40 +657,40 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
           </p>
         </div>
 
-        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full md:w-auto">
+        <div className="grid grid-cols-3 sm:flex sm:flex-wrap items-center gap-2 w-full md:w-auto">
           <button
             onClick={handleSyncTime}
-            className="min-h-[42px] sm:min-h-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 font-bold text-xs transition cursor-pointer whitespace-nowrap"
+            className="min-h-[42px] sm:min-h-0 flex items-center justify-center gap-1 px-2 sm:px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 font-bold text-[11px] sm:text-xs transition cursor-pointer min-w-0 text-center leading-tight"
             title={`Đồng bộ ngày giờ máy tính xuống đồng hồ TFT trên ${deviceName}`}
           >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Time Sync</span>
+            <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Time Sync</span>
           </button>
 
           <button
             onClick={handleBlankScreen}
             disabled={isUploading || isDecoding}
-            className="min-h-[42px] sm:min-h-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs transition disabled:opacity-50 cursor-pointer whitespace-nowrap"
+            className="min-h-[42px] sm:min-h-0 flex items-center justify-center gap-1 px-2 sm:px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-[11px] sm:text-xs transition disabled:opacity-50 cursor-pointer min-w-0 text-center leading-tight"
             title="Xóa trắng màn hình về màu đen"
           >
-            <Eraser className="w-3.5 h-3.5" />
-            <span>Blank Screen</span>
+            <Eraser className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Blank</span>
           </button>
 
           <button
             onClick={handleExportFrame}
-            className="min-h-[42px] sm:min-h-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs transition cursor-pointer whitespace-nowrap"
+            className="min-h-[42px] sm:min-h-0 flex items-center justify-center gap-1 px-2 sm:px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-[11px] sm:text-xs transition cursor-pointer min-w-0 text-center leading-tight"
           >
-            <Download className="w-3.5 h-3.5" />
-            <span>Export</span>
+            <Download className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Export</span>
           </button>
 
           <button
             onClick={handleFlashToDevice}
             disabled={isUploading || isDecoding}
-            className="min-h-[42px] sm:min-h-0 flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:from-indigo-400 hover:to-pink-400 text-white font-extrabold text-xs transition shadow-lg shadow-indigo-500/25 disabled:opacity-50 cursor-pointer whitespace-nowrap"
+            className="col-span-3 sm:col-span-1 min-h-[44px] sm:min-h-0 flex items-center justify-center gap-2 px-3 sm:px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:from-indigo-400 hover:to-pink-400 text-white font-extrabold text-xs transition shadow-lg shadow-indigo-500/25 disabled:opacity-50 cursor-pointer text-center leading-snug"
           >
-            <Upload className="w-4 h-4" />
+            <Upload className="w-4 h-4 shrink-0" />
             <span>{isUploading ? `${uploadProgress}%` : t('uploadToDevice')}</span>
           </button>
         </div>

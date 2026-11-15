@@ -90,7 +90,7 @@ export const MouseTab: React.FC<MouseTabProps> = ({
                   onChangeConfig(next);
                   if (webhidService.isConnected()) handleApplyToMouse(next);
                 }}
-                className={`min-h-[40px] sm:min-h-0 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+                className={`min-h-[40px] sm:min-h-0 px-1.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition cursor-pointer whitespace-nowrap min-w-0 text-center ${
                   config.pollingRate === rate
                     ? 'bg-cyan-500 text-slate-950 shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
