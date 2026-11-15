@@ -1776,12 +1776,12 @@ export default function App() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-x-clip">
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl bg-slate-900 border border-cyan-500/80 text-cyan-300 text-xs font-bold shadow-2xl shadow-cyan-500/20 animate-in fade-in slide-in-from-bottom-3">
+        <div className="fixed bottom-20 inset-x-3 sm:inset-x-auto sm:bottom-6 sm:right-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl bg-slate-900/95 backdrop-blur-md border border-cyan-500/80 text-cyan-300 text-xs font-bold shadow-2xl shadow-cyan-500/20 animate-in fade-in slide-in-from-bottom-3">
           <CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" />
-          <span>{toastMessage}</span>
+          <span className="leading-snug">{toastMessage}</span>
         </div>
       )}
 
@@ -1820,12 +1820,14 @@ export default function App() {
 
       {/* Real Hardware / Firebase Remote Bridge Status Banner */}
       {isRemoteBridgeOnline ? (
-        <div className="bg-emerald-950/45 border-b border-emerald-700/50 px-4 py-2">
-          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-2 text-emerald-200">
+        <div className="bg-emerald-950/45 border-b border-emerald-700/50 px-3 sm:px-4 py-2">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-emerald-200 min-w-0">
               <Smartphone className="w-4 h-4 text-cyan-300 shrink-0" />
-              <span>
-                {lang === 'vi' ? 'Chế độ điều khiển từ xa qua Firebase:' : 'Firebase Remote Control:'}{' '}
+              <span className="truncate sm:whitespace-normal">
+                <span className="hidden sm:inline">
+                  {lang === 'vi' ? 'Chế độ điều khiển từ xa qua Firebase:' : 'Firebase Remote Control:'}{' '}
+                </span>
                 <strong className="text-white">
                   {remoteBridge?.productName || selectedDevice.name}
                 </strong>{' '}
@@ -1837,29 +1839,28 @@ export default function App() {
                     ? 'USB-C'
                     : 'Online'}
                   {typeof remoteBridge?.batteryLevel === 'number'
-                    ? ` • Pin ${remoteBridge.batteryLevel}%`
+                    ? ` • ${remoteBridge.batteryLevel}%`
                     : ''}
                 </span>{' '}
-                <span className="text-slate-300 hidden sm:inline">
+                <span className="text-slate-300 hidden md:inline">
                   — Mọi chỉnh sửa LED, Keymap, Macro, DPI sẽ tự động gửi xuống máy tính.
                 </span>
               </span>
             </div>
             <button
               onClick={handleManualCloudSync}
-              className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition cursor-pointer"
+              className="shrink-0 min-h-[34px] px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition cursor-pointer whitespace-nowrap"
             >
-              {lang === 'vi' ? 'Đồng bộ ngay' : 'Sync Now'}
+              {lang === 'vi' ? 'Đồng bộ' : 'Sync'}
             </button>
           </div>
         </div>
       ) : !isConnected && pairedDevices.length > 0 ? (
-        <div className="bg-cyan-950/40 border-b border-cyan-800/50 px-4 py-2">
-          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-2 text-cyan-200">
-              <Usb className="w-4 h-4 text-cyan-400" />
-              <span>
-                Phát hiện thiết bị đã ghép nối:{' '}
+        <div className="bg-cyan-950/40 border-b border-cyan-800/50 px-3 sm:px-4 py-2">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-cyan-200 min-w-0">
+              <Usb className="w-4 h-4 text-cyan-400 shrink-0" />
+              <span className="truncate">
                 <strong className="text-white">
                   {pairedDevices[0].productName || 'AULA HID Device'}
                 </strong>{' '}
@@ -1868,26 +1869,26 @@ export default function App() {
             </div>
             <button
               onClick={() => handleConnectPaired(pairedDevices[0])}
-              className="px-3 py-1 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold transition cursor-pointer"
+              className="shrink-0 min-h-[34px] px-3 py-1 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold transition cursor-pointer whitespace-nowrap"
             >
-              Kết nối lại ngay
+              Kết nối lại
             </button>
           </div>
         </div>
       ) : !isConnected ? (
-        <div className="bg-amber-950/30 border-b border-amber-800/40 px-4 py-2">
-          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-2 text-amber-200">
-              <Usb className="w-4 h-4 text-amber-400" />
-              <span>
+        <div className="bg-amber-950/30 border-b border-amber-800/40 px-3 sm:px-4 py-2">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-amber-200 min-w-0">
+              <Usb className="w-4 h-4 text-amber-400 shrink-0 hidden sm:block" />
+              <span className="leading-snug text-[11px] sm:text-xs">
                 {cloudSessionUid
-                  ? 'Trên máy tính: bấm Kết nối thiết bị WebHID để làm cầu nối. Trên điện thoại: chỉnh trực tiếp để đồng bộ qua Firebase.'
-                  : 'Chế độ phần cứng thật: cắm cáp USB-C / 2.4GHz trên máy tính để kết nối WebHID, hoặc đăng nhập Google để điều khiển đồng bộ từ điện thoại.'}
+                  ? 'Máy tính: kết nối WebHID làm cầu nối. Điện thoại: chỉnh trực tiếp để đồng bộ Firebase.'
+                  : 'Đăng nhập Google để điều khiển từ điện thoại, hoặc cắm cáp USB trên máy tính.'}
               </span>
             </div>
             <button
               onClick={() => handleConnectHID(false)}
-              className="px-3 py-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold transition cursor-pointer"
+              className="hidden sm:inline-flex shrink-0 min-h-[34px] items-center px-3 py-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold transition cursor-pointer whitespace-nowrap"
             >
               Kết nối ngay
             </button>
@@ -1976,23 +1977,40 @@ export default function App() {
       )}
 
       {/* Main Content Area: Left Workspace + Right Vertical Sidebar */}
-      <main className="flex-1 max-w-[1440px] w-full mx-auto p-4 md:p-6 flex flex-col lg:flex-row gap-6 items-start">
+      <main className="flex-1 max-w-[1440px] w-full mx-auto px-3 py-3 sm:p-4 md:p-6 pb-24 lg:pb-8 flex flex-col lg:flex-row gap-4 sm:gap-6 items-start">
         {/* Left Main Workspace */}
-        <div className="flex-1 min-w-0 w-full flex flex-col gap-6">
+        <div className="flex-1 min-w-0 w-full flex flex-col gap-4 sm:gap-6">
           {/* Device Visualizer Stage */}
-          <section className="relative rounded-2xl border border-slate-800/90 bg-gradient-to-b from-slate-900/75 via-slate-950/90 to-slate-950 p-4 sm:p-6 md:p-7 shadow-2xl flex flex-col items-center gap-4 overflow-hidden">
-            <div className="w-full flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 border-b border-slate-800/70 pb-3">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-slate-100">{selectedDevice.name}</span>
-                <span aria-hidden="true">·</span>
-                <span>{selectedDevice.layoutName}</span>
-                <span aria-hidden="true">·</span>
-                <span>{selectedDevice.series}</span>
+          <section className="relative rounded-xl sm:rounded-2xl border border-slate-800/90 bg-gradient-to-b from-slate-900/75 via-slate-950/90 to-slate-950 p-3 sm:p-6 md:p-7 shadow-2xl flex flex-col items-center gap-3 sm:gap-4 overflow-hidden">
+            <div className="w-full flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 border-b border-slate-800/70 pb-2.5 sm:pb-3">
+              <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                <span className="font-bold text-slate-100 truncate">{selectedDevice.name}</span>
+                <span aria-hidden="true" className="hidden xs:inline">·</span>
+                <span className="hidden sm:inline">{selectedDevice.layoutName}</span>
+                <span aria-hidden="true" className="hidden md:inline">·</span>
+                <span className="hidden md:inline">{selectedDevice.series}</span>
               </div>
-              <div className="font-mono tabular-nums text-[11px] text-slate-400">
-                {selectedDevice.type === 'keyboard'
-                  ? `${t(`layer${activeLayer}`)} · Profile P${activeProfile}`
-                  : `Profile P${activeProfile}`}
+              <div className="flex items-center gap-2">
+                <div className="flex md:hidden items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5">
+                  {[1, 2, 3].map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setActiveProfile(p)}
+                      className={`px-2 py-0.5 text-[11px] font-bold rounded transition cursor-pointer ${
+                        activeProfile === p
+                          ? 'bg-cyan-500 text-slate-950'
+                          : 'text-slate-400'
+                      }`}
+                    >
+                      P{p}
+                    </button>
+                  ))}
+                </div>
+                <div className="font-mono tabular-nums text-[11px] text-slate-400 hidden sm:block">
+                  {selectedDevice.type === 'keyboard'
+                    ? `${t(`layer${activeLayer}`)} · Profile P${activeProfile}`
+                    : `Profile P${activeProfile}`}
+                </div>
               </div>
             </div>
 
@@ -2021,7 +2039,7 @@ export default function App() {
           </section>
 
           {/* Tab Content Panes */}
-          <div className="pb-12">
+          <div className="pb-2 lg:pb-12">
             {activeTab === 'keymap' && selectedDevice.type === 'keyboard' && (
               <KeymapTab
                 selectedKey={selectedKey}
@@ -2134,12 +2152,12 @@ export default function App() {
 
         {/* Right Vertical Sidebar */}
         <aside className="w-full lg:w-64 shrink-0 lg:sticky lg:top-20 flex flex-col gap-4">
-          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 flex flex-col gap-2 shadow-xl">
+          <div className="hidden lg:flex bg-slate-900/90 border border-slate-800 rounded-2xl p-3 flex-col gap-2 shadow-xl">
             <div className="px-2 pt-1 pb-1.5 text-[11px] font-semibold text-slate-400 border-b border-slate-800/80">
               {lang === 'vi' ? 'Bảng điều khiển' : 'Workspace'}
             </div>
 
-            <nav className="grid grid-cols-2 sm:grid-cols-4 lg:flex lg:flex-col gap-1">
+            <nav className="flex flex-col gap-1">
               {navTabs.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.id;
@@ -2327,6 +2345,42 @@ export default function App() {
           </div>
         </aside>
       </main>
+
+      {/* Fixed Mobile Bottom Navigation Bar */}
+      <nav
+        aria-label="Mobile workspace navigation"
+        className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-slate-950/95 backdrop-blur-lg border-t border-slate-800/90 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_28px_rgba(0,0,0,0.65)]"
+      >
+        <div className="flex items-stretch overflow-x-auto no-scrollbar px-1.5 py-1 gap-1">
+          {navTabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`relative flex-1 min-w-[70px] min-h-[50px] px-2 py-1 rounded-xl flex flex-col items-center justify-center gap-1 transition cursor-pointer whitespace-nowrap shrink-0 ${
+                  isActive
+                    ? 'bg-cyan-500/15 text-cyan-300'
+                    : 'text-slate-400 active:bg-slate-800/70'
+                }`}
+              >
+                {isActive && (
+                  <span className="absolute top-0 left-1/2 -translate-x-1/2 w-6 h-[2px] rounded-full bg-cyan-400" />
+                )}
+                <Icon
+                  className={`w-4 h-4 shrink-0 ${
+                    isActive ? 'text-cyan-400' : 'text-slate-400'
+                  }`}
+                />
+                <span className="text-[10px] font-semibold leading-none tracking-tight">
+                  {tab.name}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
     </div>
   );
 }

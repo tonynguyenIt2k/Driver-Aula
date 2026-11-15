@@ -90,15 +90,175 @@ function drawCoverFrame(
   ctx.restore();
 }
 
+function encodeCanvasFrame(canvas: HTMLCanvasElement): string {
+  const webp = canvas.toDataURL('image/webp', 0.88);
+  if (webp.startsWith('data:image/webp')) {
+    return webp;
+  }
+  return canvas.toDataURL('image/jpeg', 0.88);
+}
+
+export function isVideoFile(file: File): boolean {
+  if (file.type && file.type.startsWith('video/')) return true;
+  return /\.(mp4|mov|m4v|webm|avi|mkv|3gp|ogv)$/i.test(file.name);
+}
+
+async function decodeVideoFileToFrames(
+  file: File,
+  canvas: HTMLCanvasElement,
+  ctx: CanvasRenderingContext2D,
+  orientation: 0 | 90 | 180 | 270,
+  maxFrames: number,
+  targetWidth: number,
+  targetHeight: number,
+  onProgress?: (pct: number) => void
+): Promise<ScreenFrame[]> {
+  const videoUrl = URL.createObjectURL(file);
+  const video = document.createElement('video');
+  video.muted = true;
+  video.defaultMuted = true;
+  video.playsInline = true;
+  video.setAttribute('playsinline', '');
+  video.setAttribute('webkit-playsinline', '');
+  video.preload = 'auto';
+  video.style.position = 'fixed';
+  video.style.left = '-9999px';
+  video.style.top = '-9999px';
+  video.style.width = '2px';
+  video.style.height = '2px';
+  video.style.opacity = '0';
+  video.style.pointerEvents = 'none';
+  document.body.appendChild(video);
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const timer = window.setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          reject(new Error('Hết thời gian đọc tệp video. Hãy thử video ngắn hơn hoặc định dạng MP4 (H.264).'));
+        }
+      }, 12000);
+
+      const finish = () => {
+        if (settled) return;
+        if (video.readyState >= 2 && video.videoWidth > 0) {
+          settled = true;
+          window.clearTimeout(timer);
+          resolve();
+        }
+      };
+
+      video.onloadeddata = finish;
+      video.oncanplay = finish;
+      video.onerror = () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        reject(new Error('Không thể giải mã video này trên trình duyệt (codec chưa được hỗ trợ, hãy thử MP4 H.264 hoặc WebM).'));
+      };
+
+      video.src = videoUrl;
+      video.load();
+    });
+
+    // Unlock hardware video decoder on iOS Safari / mobile browsers
+    try {
+      await video.play();
+      video.pause();
+    } catch {
+      // Ignore autoplay blocks; muted playsInline seek still works on most engines
+    }
+
+    const srcW = video.videoWidth || targetWidth;
+    const srcH = video.videoHeight || targetHeight;
+    if (srcW <= 0 || srcH <= 0) {
+      throw new Error('Không đọc được kích thước khung hình từ video.');
+    }
+
+    const rawDuration = video.duration;
+    const hasDuration = Number.isFinite(rawDuration) && rawDuration > 0;
+    const clipDuration = hasDuration ? Math.min(rawDuration, 12) : 5;
+    const cappedMax = Math.max(1, Math.min(maxFrames, 75));
+    const targetFps = 12;
+    const sampleCount = Math.max(1, Math.min(cappedMax, Math.round(clipDuration * targetFps)));
+    const stepSec = sampleCount > 1 ? clipDuration / sampleCount : 0;
+    const delayMs = Math.max(20, Math.min(500, Math.round((clipDuration * 1000) / sampleCount) || 80));
+
+    const frames: ScreenFrame[] = [];
+    const baseTs = Date.now();
+
+    for (let idx = 0; idx < sampleCount; idx++) {
+      const maxSeek = hasDuration ? Math.max(0, rawDuration - 0.03) : clipDuration;
+      const targetTime = Math.min(idx * stepSec, maxSeek);
+
+      if (Math.abs(video.currentTime - targetTime) > 0.015 || idx > 0) {
+        await new Promise<void>((resolve) => {
+          let done = false;
+          const timer = window.setTimeout(() => {
+            if (!done) {
+              done = true;
+              resolve();
+            }
+          }, 1200);
+
+          const onSeeked = () => {
+            if (done) return;
+            done = true;
+            window.clearTimeout(timer);
+            video.removeEventListener('seeked', onSeeked);
+            resolve();
+          };
+          video.addEventListener('seeked', onSeeked, { once: true });
+          try {
+            video.currentTime = targetTime;
+          } catch {
+            done = true;
+            window.clearTimeout(timer);
+            video.removeEventListener('seeked', onSeeked);
+            resolve();
+          }
+        });
+      }
+
+      drawCoverFrame(ctx, video, srcW, srcH, targetWidth, targetHeight, orientation);
+      frames.push({
+        id: `vf-${idx}-${baseTs}`,
+        dataUrl: encodeCanvasFrame(canvas),
+        delayMs,
+      });
+
+      onProgress?.(Math.round(((idx + 1) / sampleCount) * 100));
+    }
+
+    if (frames.length === 0) {
+      throw new Error('Không trích xuất được khung hình nào từ video.');
+    }
+
+    return frames;
+  } finally {
+    try {
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+    } catch {
+      // Ignore cleanup errors
+    }
+    video.remove();
+    URL.revokeObjectURL(videoUrl);
+  }
+}
+
 /**
- * Decodes an uploaded GIF / PNG / JPG / WebP or URL into editable targetW x targetH ScreenFrame[] items.
+ * Decodes an uploaded Video / GIF / PNG / JPG / WebP or URL into editable targetW x targetH ScreenFrame[] items.
  */
 export async function decodeSourceToFrames(
   source: File | string,
   orientation: 0 | 90 | 180 | 270 = 0,
   maxFrames: number = AULA_TFT_MAX_FRAMES,
   targetWidth: number = AULA_TFT_WIDTH,
-  targetHeight: number = AULA_TFT_HEIGHT
+  targetHeight: number = AULA_TFT_HEIGHT,
+  onProgress?: (pct: number) => void
 ): Promise<ScreenFrame[]> {
   const canvas = document.createElement('canvas');
   canvas.width = targetWidth;
@@ -106,6 +266,19 @@ export async function decodeSourceToFrames(
   const ctx = canvas.getContext('2d');
   if (!ctx) {
     throw new Error('Không thể khởi tạo Canvas 2D để xử lý khung hình.');
+  }
+
+  if (source instanceof File && isVideoFile(source)) {
+    return decodeVideoFileToFrames(
+      source,
+      canvas,
+      ctx,
+      orientation,
+      maxFrames,
+      targetWidth,
+      targetHeight,
+      onProgress
+    );
   }
 
   const ImageDecoderCtor = (window as unknown as { ImageDecoder?: any }).ImageDecoder;
@@ -139,6 +312,7 @@ export async function decodeSourceToFrames(
           dataUrl: canvas.toDataURL('image/png'),
           delayMs,
         });
+        onProgress?.(Math.round(((idx + step) / totalGifFrames) * 100));
       }
       decoder.close?.();
 
@@ -156,7 +330,7 @@ export async function decodeSourceToFrames(
       const el = new Image();
       el.crossOrigin = 'anonymous';
       el.onload = () => resolve(el);
-      el.onerror = () => reject(new Error('Không thể tải ảnh nguồn để giải mã.'));
+      el.onerror = () => reject(new Error('Không thể tải ảnh/video nguồn để giải mã.'));
       el.src = imgUrl;
     });
 

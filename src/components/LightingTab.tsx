@@ -163,60 +163,60 @@ export const LightingTab: React.FC<LightingTabProps> = ({
     <div className="flex flex-col gap-6">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Effect Mode Selector */}
-        <div className="lg:col-span-1 bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col gap-4">
+        <div className="lg:col-span-1 bg-slate-900 border border-slate-800 rounded-xl p-3.5 sm:p-5 flex flex-col gap-3 sm:gap-4">
           <div className="flex items-center gap-2 text-cyan-400 font-bold text-sm">
             <Sparkles className="w-4 h-4" />
             <span>{t('effectMode')}</span>
           </div>
 
-          <div className="flex flex-col gap-1.5 max-h-[420px] overflow-y-auto pr-1">
+          <div className="grid grid-cols-2 lg:flex lg:flex-col gap-1.5 max-h-[260px] lg:max-h-[420px] overflow-y-auto pr-1">
             {effects.map((eff) => (
               <button
                 key={eff.id}
                 onClick={() => handleModeChange(eff.id)}
-                className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-semibold transition flex items-center justify-between cursor-pointer ${
+                className={`min-h-[42px] sm:min-h-0 w-full text-left px-3 py-2 rounded-xl text-xs font-semibold transition flex items-center justify-between gap-1.5 cursor-pointer ${
                   lighting.mode === eff.id
                     ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-bold shadow-md shadow-amber-500/20'
                     : 'bg-slate-950/60 hover:bg-slate-800 text-slate-300 border border-slate-800/80'
                 }`}
               >
-                <span>{eff.label}</span>
-                {lighting.mode === eff.id && <CheckCircle className="w-3.5 h-3.5" />}
+                <span className="truncate">{eff.label}</span>
+                {lighting.mode === eff.id && <CheckCircle className="w-3.5 h-3.5 shrink-0" />}
               </button>
             ))}
           </div>
         </div>
 
         {/* Right Column: Controls, Music Rhythm, & RGB Palette */}
-        <div className="lg:col-span-2 flex flex-col gap-5">
+        <div className="lg:col-span-2 flex flex-col gap-4 sm:gap-5">
           {/* Quick Group Selection (Select All / Numeric / WASD from official S75 Pro UI) */}
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-xs font-bold text-slate-300">
-              <CheckSquare className="w-4 h-4 text-cyan-400" />
+              <CheckSquare className="w-4 h-4 text-cyan-400 shrink-0" />
               <span>Chọn nhanh vùng phím tô màu:</span>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
               <button
                 onClick={() => handleQuickGroup('all')}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-cyan-500 hover:text-slate-950 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer"
+                className="min-h-[40px] sm:min-h-0 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-cyan-500 hover:text-slate-950 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer"
               >
                 Select All
               </button>
               <button
                 onClick={() => handleQuickGroup('numeric')}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-cyan-500 hover:text-slate-950 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer"
+                className="min-h-[40px] sm:min-h-0 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-cyan-500 hover:text-slate-950 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer"
               >
                 Numeric (1–0)
               </button>
               <button
                 onClick={() => handleQuickGroup('wasd')}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-cyan-500 hover:text-slate-950 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer"
+                className="min-h-[40px] sm:min-h-0 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-cyan-500 hover:text-slate-950 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer"
               >
                 WASD
               </button>
               <button
                 onClick={onClearCustomMatrix}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/70 text-slate-300 hover:text-rose-400 text-xs font-semibold border border-slate-700 transition cursor-pointer"
+                className="min-h-[40px] sm:min-h-0 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/70 text-slate-300 hover:text-rose-400 text-xs font-semibold border border-slate-700 transition cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Xóa màu vẽ</span>
@@ -447,14 +447,14 @@ export const LightingTab: React.FC<LightingTabProps> = ({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-slate-800">
               <div className="flex flex-wrap gap-2">
                 {PRESET_COLORS.map((color) => (
                   <button
                     key={color}
                     onClick={() => handleColorSet(color)}
                     style={{ backgroundColor: color }}
-                    className={`w-8 h-8 rounded-lg border border-slate-700 transition-transform hover:scale-110 cursor-pointer ${
+                    className={`w-9 h-9 sm:w-8 sm:h-8 rounded-lg border border-slate-700 transition-transform hover:scale-110 cursor-pointer ${
                       activeColorHex.toLowerCase() === color.toLowerCase()
                         ? 'ring-2 ring-white ring-offset-2 ring-offset-slate-900'
                         : ''
@@ -465,7 +465,7 @@ export const LightingTab: React.FC<LightingTabProps> = ({
 
               <button
                 onClick={() => onToggleCustomMatrix(!isCustomMatrixActive)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                className={`min-h-[42px] sm:min-h-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border transition cursor-pointer ${
                   isCustomMatrixActive
                     ? 'bg-cyan-500 text-slate-950 border-cyan-400'
                     : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
@@ -480,7 +480,7 @@ export const LightingTab: React.FC<LightingTabProps> = ({
           {/* Apply Button */}
           <button
             onClick={onApplyLighting}
-            className="w-full py-3.5 rounded-xl bg-gradient-to-r from-cyan-500 via-sky-400 to-indigo-500 hover:from-cyan-400 hover:to-indigo-400 text-slate-950 font-extrabold text-sm transition shadow-lg shadow-cyan-500/25 flex items-center justify-center gap-2 cursor-pointer"
+            className="min-h-[48px] w-full py-3.5 rounded-xl bg-gradient-to-r from-cyan-500 via-sky-400 to-indigo-500 hover:from-cyan-400 hover:to-indigo-400 text-slate-950 font-extrabold text-sm transition shadow-lg shadow-cyan-500/25 flex items-center justify-center gap-2 cursor-pointer"
           >
             <Sparkles className="w-4 h-4" />
             <span>{t('applyLightingBtn')}</span>

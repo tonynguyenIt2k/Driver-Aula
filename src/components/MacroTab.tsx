@@ -201,35 +201,35 @@ export const MacroTab: React.FC<MacroTabProps> = ({
     <div className="flex flex-col gap-6">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Macro List Column */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col gap-3">
-          <div className="flex items-center justify-between">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 sm:p-4 flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-2">
             <h3 className="font-bold text-xs uppercase tracking-wider text-slate-400">
               {t('macroTitle')}
             </h3>
             <button
               onClick={handleCreateMacro}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold text-xs transition"
+              className="min-h-[38px] sm:min-h-0 flex items-center gap-1 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold text-xs transition cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>{t('createMacro')}</span>
             </button>
           </div>
 
-          <div className="flex flex-col gap-1.5 max-h-[460px] overflow-y-auto pr-1">
+          <div className="flex flex-row lg:flex-col gap-2 overflow-x-auto lg:overflow-y-auto lg:max-h-[460px] pb-1 lg:pb-0 lg:pr-1 no-scrollbar">
             {macros.map((m) => (
               <div
                 key={m.id}
                 onClick={() => setSelectedMacroId(m.id)}
-                className={`p-3 rounded-xl cursor-pointer transition flex items-center justify-between ${
+                className={`p-3 rounded-xl cursor-pointer transition flex items-center justify-between gap-2 min-w-[180px] lg:min-w-0 shrink-0 ${
                   selectedMacro?.id === m.id
                     ? 'bg-gradient-to-r from-purple-900/80 to-indigo-900/80 border border-purple-500/60 text-white'
                     : 'bg-slate-950/60 hover:bg-slate-800 text-slate-300 border border-slate-800'
                 }`}
               >
-                <div className="flex flex-col">
-                  <span className="font-bold text-xs flex items-center gap-1.5">
-                    <Sparkles className="w-3 h-3 text-purple-400" />
-                    {m.name}
+                <div className="flex flex-col min-w-0">
+                  <span className="font-bold text-xs flex items-center gap-1.5 truncate">
+                    <Sparkles className="w-3 h-3 text-purple-400 shrink-0" />
+                    <span className="truncate">{m.name}</span>
                   </span>
                   <span className="text-[10px] text-slate-400">
                     {m.actions.length} sự kiện • {m.repeatMode}
@@ -240,7 +240,7 @@ export const MacroTab: React.FC<MacroTabProps> = ({
                     e.stopPropagation();
                     handleDeleteMacro(m.id);
                   }}
-                  className="p-1 hover:text-rose-400 text-slate-500 transition"
+                  className="p-2 hover:text-rose-400 text-slate-500 transition cursor-pointer shrink-0"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -254,8 +254,8 @@ export const MacroTab: React.FC<MacroTabProps> = ({
           {selectedMacro ? (
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col gap-5">
               {/* Top controls of selected macro */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-                <div className="flex items-center gap-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 border-b border-slate-800 pb-4">
+                <div className="flex items-center gap-3 min-w-0">
                   <input
                     type="text"
                     value={selectedMacro.name}
@@ -265,16 +265,16 @@ export const MacroTab: React.FC<MacroTabProps> = ({
                       );
                       onUpdateMacros(updated);
                     }}
-                    className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm font-bold text-slate-100 focus:outline-none focus:border-purple-500"
+                    className="flex-1 min-w-0 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm font-bold text-slate-100 focus:outline-none focus:border-purple-500"
                   />
-                  <div className="flex items-center gap-1 text-xs text-slate-400 font-mono">
+                  <div className="flex items-center gap-1 text-xs text-slate-400 font-mono shrink-0">
                     <Flame className="w-3.5 h-3.5 text-amber-400" />
                     <span>{selectedMacro.actions.length} events</span>
                   </div>
                 </div>
 
                 {/* Repeat mode */}
-                <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between sm:justify-start gap-2">
                   <span className="text-xs text-slate-400 font-medium">
                     {t('repeatMode')}:
                   </span>
@@ -287,7 +287,7 @@ export const MacroTab: React.FC<MacroTabProps> = ({
                       );
                       onUpdateMacros(updated);
                     }}
-                    className="bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold px-2.5 py-1.5 rounded-lg focus:outline-none"
+                    className="min-h-[40px] sm:min-h-0 bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold px-2.5 py-1.5 rounded-lg focus:outline-none"
                   >
                     <option value="once">{t('repeatOnce')}</option>
                     <option value="hold">{t('repeatHold')}</option>
@@ -297,10 +297,10 @@ export const MacroTab: React.FC<MacroTabProps> = ({
               </div>
 
               {/* Action buttons: Record, Add Delay, Clear */}
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2.5 sm:gap-3">
                 <button
                   onClick={handleToggleRecord}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition shadow-md ${
+                  className={`min-h-[44px] sm:min-h-0 flex items-center justify-center gap-2 px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition shadow-md cursor-pointer ${
                     isRecording
                       ? 'bg-rose-600 text-white animate-pulse'
                       : 'bg-gradient-to-r from-rose-500 to-pink-600 text-white hover:from-rose-600 hover:to-pink-700'
@@ -321,7 +321,7 @@ export const MacroTab: React.FC<MacroTabProps> = ({
 
                 <button
                   onClick={handleAddDelay}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition"
+                  className="min-h-[44px] sm:min-h-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition cursor-pointer"
                 >
                   <Clock className="w-3.5 h-3.5 text-cyan-400" />
                   <span>{t('addDelay')}</span>
@@ -330,7 +330,7 @@ export const MacroTab: React.FC<MacroTabProps> = ({
                 <button
                   onClick={handlePlayMacroTest}
                   disabled={isPlayingTest || selectedMacro.actions.length === 0}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs transition disabled:opacity-50"
+                  className="min-h-[44px] sm:min-h-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs transition disabled:opacity-50 cursor-pointer"
                 >
                   <Play className="w-3.5 h-3.5 fill-current" />
                   <span>{isPlayingTest ? 'Đang chạy...' : 'Chạy thử Macro'}</span>
@@ -339,10 +339,10 @@ export const MacroTab: React.FC<MacroTabProps> = ({
                 <button
                   onClick={handleApplyMacrosToHardware}
                   disabled={isApplyingHw}
-                  className="ml-auto flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-500/20 transition disabled:opacity-50 cursor-pointer"
+                  className="min-h-[44px] sm:min-h-0 sm:ml-auto flex items-center justify-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-500/20 transition disabled:opacity-50 cursor-pointer"
                 >
                   <Upload className="w-3.5 h-3.5" />
-                  <span>{isApplyingHw ? 'Đang ghi...' : 'Nạp Macro xuống bàn phím'}</span>
+                  <span>{isApplyingHw ? 'Đang ghi...' : 'Nạp Macro'}</span>
                 </button>
               </div>
 

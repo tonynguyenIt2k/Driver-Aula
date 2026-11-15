@@ -13,6 +13,8 @@ import {
   CloudOff,
   Loader2,
   LogOut,
+  SlidersHorizontal,
+  X,
 } from 'lucide-react';
 import { DeviceModel, Language } from '../types/device';
 import { ConnectedDeviceInfo } from '../services/webhid';
@@ -72,60 +74,124 @@ export const Header: React.FC<HeaderProps> = ({
   onSignOutGoogle,
 }) => {
   const [showResetModal, setShowResetModal] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   return (
-    <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur-md sticky top-0 z-40 px-4 py-3">
-      <div className="max-w-[1440px] mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
-        {/* Logo and Device Picker */}
-        <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-start">
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 text-cyan-400">
-              <Keyboard className="w-4 h-4" />
+    <header className="border-b border-slate-800 bg-slate-900/95 backdrop-blur-md sticky top-0 z-40 px-3 py-2 md:px-4 md:py-3">
+      <div className="max-w-[1440px] mx-auto flex items-center justify-between gap-2 md:gap-3">
+        {/* Logo & Device Picker */}
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 md:flex-initial">
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center justify-center w-8 h-8 md:w-9 md:h-9 rounded-lg bg-slate-800 border border-slate-700 text-cyan-400">
+              {selectedDevice.type === 'mouse' ? (
+                <MouseIcon className="w-4 h-4" />
+              ) : (
+                <Keyboard className="w-4 h-4" />
+              )}
             </div>
-            <div>
-              <div className="font-bold text-base tracking-tight text-slate-100 whitespace-nowrap">
+            <div className="hidden xs:block sm:block">
+              <div className="font-bold text-sm md:text-base tracking-tight text-slate-100 whitespace-nowrap">
                 {t('appName')}
               </div>
-              <p className="text-[11px] text-slate-400 hidden sm:block whitespace-nowrap">
+              <p className="text-[11px] text-slate-400 hidden lg:block whitespace-nowrap">
                 {t('appSubtitle')}
               </p>
             </div>
           </div>
 
           {/* Device Switcher Dropdown */}
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <select
-                value={selectedDevice.id}
-                onChange={(e) => {
-                  const dev = devices.find((d) => d.id === e.target.value);
-                  if (dev) onSelectDevice(dev);
-                }}
-                className="appearance-none bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-semibold pl-8 pr-8 py-2 rounded-lg border border-slate-700/80 focus:outline-none focus:border-cyan-500 transition-colors cursor-pointer shadow-inner"
-              >
-                {devices.map((d) => (
-                  <option key={d.id} value={d.id} className="bg-slate-900 text-slate-100">
-                    {d.name} ({d.layoutName.split(' ')[0]})
-                  </option>
-                ))}
-              </select>
-              <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-cyan-400">
-                {selectedDevice.type === 'mouse' ? (
-                  <MouseIcon className="w-3.5 h-3.5" />
-                ) : (
-                  <Keyboard className="w-3.5 h-3.5" />
-                )}
-              </div>
-              <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[10px]">
-                ▼
-              </div>
+          <div className="relative flex-1 min-w-0 max-w-[190px] sm:max-w-[230px] md:max-w-none">
+            <select
+              value={selectedDevice.id}
+              onChange={(e) => {
+                const dev = devices.find((d) => d.id === e.target.value);
+                if (dev) onSelectDevice(dev);
+              }}
+              aria-label="Select AULA device"
+              className="w-full appearance-none bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-semibold pl-7 md:pl-8 pr-6 md:pr-8 py-2 rounded-lg border border-slate-700/80 focus:outline-none focus:border-cyan-500 transition-colors cursor-pointer shadow-inner truncate"
+            >
+              {devices.map((d) => (
+                <option key={d.id} value={d.id} className="bg-slate-900 text-slate-100">
+                  {d.name} ({d.layoutName.split(' ')[0]})
+                </option>
+              ))}
+            </select>
+            <div className="absolute left-2 md:left-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-cyan-400">
+              {selectedDevice.type === 'mouse' ? (
+                <MouseIcon className="w-3.5 h-3.5" />
+              ) : (
+                <Keyboard className="w-3.5 h-3.5" />
+              )}
+            </div>
+            <div className="absolute right-2 md:right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[10px]">
+              ▼
             </div>
           </div>
         </div>
 
-        {/* Center / Right controls */}
-        <div className="flex flex-wrap items-center justify-end gap-2.5 w-full md:w-auto">
+        {/* Mobile Compact Quick Actions (Visible < md) */}
+        <div className="flex md:hidden items-center gap-1.5 shrink-0">
+          {user ? (
+            <button
+              onClick={() => setShowMobileMenu((v) => !v)}
+              className="flex items-center gap-1.5 h-9 px-2 rounded-lg bg-slate-800/90 border border-slate-700/80 cursor-pointer"
+              title={user.displayName || 'Account'}
+            >
+              {user.photoURL ? (
+                <img
+                  src={user.photoURL}
+                  alt={user.displayName || 'User'}
+                  referrerPolicy="no-referrer"
+                  className="w-5 h-5 rounded object-cover"
+                />
+              ) : (
+                <div className="w-5 h-5 rounded bg-cyan-500/20 text-cyan-300 text-[10px] font-bold flex items-center justify-center">
+                  {(user.displayName || user.email || 'U').charAt(0).toUpperCase()}
+                </div>
+              )}
+              {cloudSyncStatus === 'syncing' ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+              ) : cloudSyncStatus === 'error' ? (
+                <CloudOff className="w-3.5 h-3.5 text-rose-400" />
+              ) : (
+                <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+              )}
+            </button>
+          ) : (
+            <button
+              onClick={onSignInGoogle}
+              disabled={authLoading}
+              className="flex items-center gap-1.5 h-9 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-100 border border-slate-600/80 cursor-pointer disabled:opacity-60"
+            >
+              {authLoading ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+              ) : (
+                <Cloud className="w-3.5 h-3.5 text-cyan-400" />
+              )}
+              <span className="whitespace-nowrap">Google</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => setShowMobileMenu((v) => !v)}
+            aria-label="Mở menu tùy chọn"
+            className={`w-9 h-9 rounded-lg border flex items-center justify-center transition cursor-pointer ${
+              showMobileMenu
+                ? 'bg-cyan-500 text-slate-950 border-cyan-400'
+                : 'bg-slate-800 text-slate-200 border-slate-700'
+            }`}
+          >
+            {showMobileMenu ? (
+              <X className="w-4 h-4" />
+            ) : (
+              <SlidersHorizontal className="w-4 h-4" />
+            )}
+          </button>
+        </div>
+
+        {/* Desktop Full Controls (Hidden < md) */}
+        <div className="hidden md:flex flex-wrap items-center justify-end gap-2.5">
           {/* Connection Status Badge & Button */}
           <div className="flex items-center gap-2 bg-slate-800/80 p-1 pl-2.5 rounded-lg border border-slate-700/70">
             <div className="flex items-center gap-1.5 text-xs">
@@ -145,7 +211,6 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </div>
 
-            {/* Real Battery / Link Mode Indicator (only shown when connected) */}
             {isConnected && (
               <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-900/80 text-[11px] font-mono text-cyan-300 border border-slate-700/40">
                 <BatteryCharging className="w-3 h-3 text-emerald-400" />
@@ -159,7 +224,6 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             )}
 
-            {/* Connect / Disconnect button */}
             {isConnected ? (
               <button
                 onClick={onDisconnectHID}
@@ -181,14 +245,14 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Profile Switcher (P1, P2, P3) */}
           <div className="flex items-center bg-slate-800/80 rounded-lg p-0.5 border border-slate-700/70">
-            <span className="text-[11px] text-slate-400 font-medium px-2 hidden sm:inline">
+            <span className="text-[11px] text-slate-400 font-medium px-2 hidden lg:inline">
               Profile:
             </span>
             {[1, 2, 3].map((p) => (
               <button
                 key={p}
                 onClick={() => onSelectProfile(p)}
-                className={`px-2.5 py-1 text-xs font-bold rounded-md transition ${
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition cursor-pointer ${
                   activeProfile === p
                     ? 'bg-cyan-500 text-slate-950 shadow-sm'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
@@ -204,7 +268,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onExportProfile}
               title={t('exportProfile')}
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:border-slate-600 transition"
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:border-slate-600 transition cursor-pointer"
             >
               <Download className="w-4 h-4" />
             </button>
@@ -212,27 +276,19 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={() => fileInputRef.current?.click()}
               title={t('importProfile')}
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:border-slate-600 transition"
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:border-slate-600 transition cursor-pointer"
             >
               <Upload className="w-4 h-4" />
             </button>
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={onImportProfile}
-              accept=".json"
-              className="hidden"
-            />
 
             <button
               onClick={() => setShowResetModal(true)}
               title={t('factoryReset')}
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-400 border border-slate-700 hover:border-rose-900 transition"
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-400 border border-slate-700 hover:border-rose-900 transition cursor-pointer"
             >
               <RotateCcw className="w-4 h-4" />
             </button>
 
-            {/* Language Switcher */}
             <button
               onClick={onToggleLang}
               className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 border border-slate-700 transition cursor-pointer"
@@ -258,7 +314,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </div>
               )}
 
-              <div className="hidden sm:flex flex-col leading-tight max-w-[115px]">
+              <div className="hidden lg:flex flex-col leading-tight max-w-[115px]">
                 <span className="text-[11px] font-semibold text-slate-100 truncate">
                   {user.displayName || user.email?.split('@')[0] || 'Google User'}
                 </span>
@@ -335,6 +391,123 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
+      {/* Shared Hidden Profile File Input */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={onImportProfile}
+        accept=".json"
+        className="hidden"
+      />
+
+      {/* Mobile Dropdown Quick Tools Sheet */}
+      {showMobileMenu && (
+        <div className="md:hidden mt-2.5 pt-2.5 border-t border-slate-800 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2">
+          {/* Profile P1-P3 */}
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-slate-400">Profile:</span>
+            <div className="grid grid-cols-3 gap-1.5 flex-1 max-w-[220px]">
+              {[1, 2, 3].map((p) => (
+                <button
+                  key={p}
+                  onClick={() => onSelectProfile(p)}
+                  className={`min-h-[40px] rounded-lg text-xs font-bold transition cursor-pointer ${
+                    activeProfile === p
+                      ? 'bg-cyan-500 text-slate-950'
+                      : 'bg-slate-800 text-slate-300 border border-slate-700'
+                  }`}
+                >
+                  P{p}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Utility Buttons Grid */}
+          <div className="grid grid-cols-2 gap-2">
+            {isConnected ? (
+              <button
+                onClick={() => {
+                  onDisconnectHID();
+                  setShowMobileMenu(false);
+                }}
+                className="min-h-[42px] px-3 rounded-xl bg-rose-950/80 text-rose-300 border border-rose-800/60 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Usb className="w-3.5 h-3.5" />
+                <span>{t('disconnect')}</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  onConnectHID();
+                  setShowMobileMenu(false);
+                }}
+                className="min-h-[42px] px-3 rounded-xl bg-cyan-600 text-slate-950 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Usb className="w-3.5 h-3.5" />
+                <span>{t('connectDevice')}</span>
+              </button>
+            )}
+
+            <button
+              onClick={onToggleLang}
+              className="min-h-[42px] px-3 rounded-xl bg-slate-800 text-slate-200 border border-slate-700 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Languages className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{lang === 'vi' ? 'Ngôn ngữ: VI' : 'Language: EN'}</span>
+            </button>
+
+            <button
+              onClick={() => {
+                onExportProfile();
+                setShowMobileMenu(false);
+              }}
+              className="min-h-[42px] px-3 rounded-xl bg-slate-800 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{t('exportProfile')}</span>
+            </button>
+
+            <button
+              onClick={() => {
+                fileInputRef.current?.click();
+                setShowMobileMenu(false);
+              }}
+              className="min-h-[42px] px-3 rounded-xl bg-slate-800 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{t('importProfile')}</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setShowResetModal(true);
+                setShowMobileMenu(false);
+              }}
+              className="flex-1 min-h-[42px] px-3 rounded-xl bg-slate-800/80 text-rose-300 border border-rose-900/60 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>{t('factoryReset')}</span>
+            </button>
+
+            {user && (
+              <button
+                onClick={() => {
+                  onSignOutGoogle();
+                  setShowMobileMenu(false);
+                }}
+                className="flex-1 min-h-[42px] px-3 rounded-xl bg-slate-800/80 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5 text-rose-400" />
+                <span>{lang === 'vi' ? 'Đăng xuất Google' : 'Sign Out'}</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Factory Reset Modal */}
       {showResetModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
@@ -351,7 +524,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="flex items-center justify-end gap-3">
               <button
                 onClick={() => setShowResetModal(false)}
-                className="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+                className="min-h-[42px] px-4 py-2 rounded-xl text-sm font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer"
               >
                 {t('cancel')}
               </button>
@@ -360,7 +533,7 @@ export const Header: React.FC<HeaderProps> = ({
                   onFactoryReset();
                   setShowResetModal(false);
                 }}
-                className="px-4 py-2 rounded-xl text-sm font-semibold bg-rose-600 hover:bg-rose-500 text-white transition shadow-lg shadow-rose-600/30"
+                className="min-h-[42px] px-4 py-2 rounded-xl text-sm font-semibold bg-rose-600 hover:bg-rose-500 text-white transition shadow-lg shadow-rose-600/30 cursor-pointer"
               >
                 {t('confirm')}
               </button>

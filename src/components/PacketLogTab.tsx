@@ -85,10 +85,10 @@ export const PacketLogTab: React.FC<PacketLogTabProps> = ({
   return (
     <div className="flex flex-col gap-6">
       {/* Top Header */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-3.5 sm:gap-4">
         <div>
-          <h3 className="font-bold text-base text-slate-100 flex items-center gap-2">
-            <Terminal className="w-5 h-5 text-cyan-400" />
+          <h3 className="font-bold text-sm sm:text-base text-slate-100 flex items-center gap-2">
+            <Terminal className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />
             <span>{t('packetsTitle')}</span>
           </h3>
           <p className="text-xs text-slate-400 mt-1 max-w-2xl">
@@ -96,14 +96,14 @@ export const PacketLogTab: React.FC<PacketLogTabProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
           {/* Filter */}
-          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-bold">
+          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-bold flex-1 sm:flex-initial justify-between">
             {(['all', 'TX', 'RX'] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
-                className={`px-3 py-1 rounded-lg transition ${
+                className={`min-h-[36px] sm:min-h-0 flex-1 sm:flex-initial px-2.5 sm:px-3 py-1 rounded-lg transition cursor-pointer whitespace-nowrap ${
                   filter === f
                     ? 'bg-cyan-500 text-slate-950'
                     : 'text-slate-400 hover:text-slate-200'
@@ -116,7 +116,7 @@ export const PacketLogTab: React.FC<PacketLogTabProps> = ({
 
           <button
             onClick={handleExportLog}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition"
+            className="min-h-[40px] sm:min-h-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Xuất file</span>
@@ -124,7 +124,7 @@ export const PacketLogTab: React.FC<PacketLogTabProps> = ({
 
           <button
             onClick={onClearLog}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-400 text-xs font-semibold border border-slate-700 transition"
+            className="min-h-[40px] sm:min-h-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-400 text-xs font-semibold border border-slate-700 transition cursor-pointer"
           >
             <Trash2 className="w-3.5 h-3.5" />
             <span>{t('clearLog')}</span>

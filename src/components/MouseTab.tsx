@@ -62,21 +62,21 @@ export const MouseTab: React.FC<MouseTabProps> = ({
   return (
     <div className="flex flex-col gap-6">
       {/* Header bar */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 sm:gap-4">
         <div>
-          <h3 className="font-bold text-base text-slate-100 flex items-center gap-2">
-            <Gauge className="w-5 h-5 text-cyan-400" />
+          <h3 className="font-bold text-sm sm:text-base text-slate-100 flex items-center gap-2">
+            <Gauge className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />
             <span>{t('mouseTitle')}</span>
           </h3>
-          <p className="text-xs text-slate-400 mt-1">
-            PixArt PAW3395 Flagship Optical Sensor • 26,000 DPI • Giao thức Open-AULA Mouse55
+          <p className="text-[11px] sm:text-xs text-slate-400 mt-1">
+            PixArt PAW3395 Flagship Optical Sensor • 26,000 DPI • Open-AULA Mouse55
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2.5 w-full sm:w-auto">
           {/* Polling Rate Selector */}
-          <div className="flex items-center gap-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-800">
-            <span className="text-xs font-bold text-slate-400 pl-2">
+          <div className="grid grid-cols-4 sm:flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+            <span className="hidden md:inline text-xs font-bold text-slate-400 pl-2 pr-1">
               {t('pollingRate')}:
             </span>
             {[125, 250, 500, 1000].map((rate) => (
@@ -90,7 +90,7 @@ export const MouseTab: React.FC<MouseTabProps> = ({
                   onChangeConfig(next);
                   if (webhidService.isConnected()) handleApplyToMouse(next);
                 }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                className={`min-h-[40px] sm:min-h-0 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap ${
                   config.pollingRate === rate
                     ? 'bg-cyan-500 text-slate-950 shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
@@ -103,7 +103,7 @@ export const MouseTab: React.FC<MouseTabProps> = ({
 
           <button
             onClick={() => handleApplyToMouse(config)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-500/20 transition cursor-pointer"
+            className="min-h-[44px] sm:min-h-0 flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-500/20 transition cursor-pointer"
           >
             <Zap className="w-3.5 h-3.5" />
             <span>Lưu xuống chuột SC620</span>

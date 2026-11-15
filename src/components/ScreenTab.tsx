@@ -129,6 +129,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
 
   // Upload & optimization stats
   const [isDecoding, setIsDecoding] = useState<boolean>(false);
+  const [decodeProgress, setDecodeProgress] = useState<number>(0);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [uploadStatusMsg, setUploadStatusMsg] = useState<string>('');
@@ -261,22 +262,33 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
 
   const handleImportMedia = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []) as File[];
-    if (files.length === 0) return;
+    if (files.length === 0 || isDecoding) return;
 
     setIsDecoding(true);
+    setDecodeProgress(0);
     setUploadError(null);
 
     try {
       let mergedFrames: ScreenFrame[] = [];
-      for (const file of files) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const remaining = Math.max(1, 141 - mergedFrames.length);
         const decoded = await decodeSourceToFrames(
           file,
           config.orientation,
-          141,
+          remaining,
           tftWidth,
-          tftHeight
+          tftHeight,
+          (pct) => {
+            const overall = Math.round(((i + pct / 100) / files.length) * 100);
+            setDecodeProgress(overall);
+          }
         );
         mergedFrames = [...mergedFrames, ...decoded];
+        if (mergedFrames.length >= 141) {
+          mergedFrames = mergedFrames.slice(0, 141);
+          break;
+        }
       }
 
       const newAnim: ScreenAnimation = {
@@ -309,9 +321,10 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
         );
       }
     } catch (err: any) {
-      setUploadError(err?.message || 'Không thể giải mã tệp ảnh/GIF đã chọn.');
+      setUploadError(err?.message || 'Không thể giải mã tệp ảnh/GIF/video đã chọn.');
     } finally {
       setIsDecoding(false);
+      setDecodeProgress(0);
       e.target.value = '';
     }
   };
@@ -633,21 +646,21 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
   return (
     <div className="flex flex-col gap-5">
       {/* Header Action Bar */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 sm:p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4">
         <div>
-          <h3 className="font-bold text-base text-slate-100 flex items-center gap-2">
-            <Tv className="w-5 h-5 text-indigo-400" />
+          <h3 className="font-bold text-sm sm:text-base text-slate-100 flex items-center gap-2">
+            <Tv className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-400 shrink-0" />
             <span>{t('screenTitle')}</span>
           </h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Chuẩn {deviceName} ({tftWidth}×{tftHeight} {isLandscape ? 'màn ngang' : 'màn dọc'} RGB565 Little-Endian • tối đa 141 frames • truyền 4096B Output qua USB-C)
+          <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5 leading-relaxed">
+            Chuẩn {deviceName} ({tftWidth}×{tftHeight} {isLandscape ? 'màn ngang' : 'màn dọc'} RGB565 • hỗ trợ Ảnh, GIF & Video MP4/MOV/WebM)
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full md:w-auto">
           <button
             onClick={handleSyncTime}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 font-bold text-xs transition cursor-pointer"
+            className="min-h-[42px] sm:min-h-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 font-bold text-xs transition cursor-pointer whitespace-nowrap"
             title={`Đồng bộ ngày giờ máy tính xuống đồng hồ TFT trên ${deviceName}`}
           >
             <RefreshCw className="w-3.5 h-3.5" />
@@ -657,7 +670,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
           <button
             onClick={handleBlankScreen}
             disabled={isUploading || isDecoding}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs transition disabled:opacity-50 cursor-pointer"
+            className="min-h-[42px] sm:min-h-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs transition disabled:opacity-50 cursor-pointer whitespace-nowrap"
             title="Xóa trắng màn hình về màu đen"
           >
             <Eraser className="w-3.5 h-3.5" />
@@ -666,7 +679,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
 
           <button
             onClick={handleExportFrame}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs transition cursor-pointer"
+            className="min-h-[42px] sm:min-h-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs transition cursor-pointer whitespace-nowrap"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Export</span>
@@ -675,7 +688,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
           <button
             onClick={handleFlashToDevice}
             disabled={isUploading || isDecoding}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:from-indigo-400 hover:to-pink-400 text-white font-extrabold text-xs transition shadow-lg shadow-indigo-500/25 disabled:opacity-50 cursor-pointer"
+            className="min-h-[42px] sm:min-h-0 flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:from-indigo-400 hover:to-pink-400 text-white font-extrabold text-xs transition shadow-lg shadow-indigo-500/25 disabled:opacity-50 cursor-pointer whitespace-nowrap"
           >
             <Upload className="w-4 h-4" />
             <span>{isUploading ? `${uploadProgress}%` : t('uploadToDevice')}</span>
@@ -721,6 +734,21 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
         </div>
       )}
 
+      {isDecoding && (
+        <div className="bg-slate-900 border border-cyan-800/80 rounded-xl p-3.5 sm:p-4 flex flex-col gap-2">
+          <div className="flex items-center justify-between text-xs font-semibold text-cyan-300">
+            <span>Đang giải mã & trích xuất khung hình (Ảnh/GIF/Video)...</span>
+            <span className="font-mono">{decodeProgress}%</span>
+          </div>
+          <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+            <div
+              className="h-full bg-gradient-to-r from-cyan-400 to-indigo-500 transition-all duration-100"
+              style={{ width: `${Math.max(8, decodeProgress)}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {isUploading && (
         <div className="bg-slate-900 border border-indigo-800/80 rounded-xl p-4 flex flex-col gap-2">
           <div className="flex items-center justify-between text-xs font-semibold text-indigo-300">
@@ -738,8 +766,8 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
 
       {/* Official S75 Pro 3-Column Screen Studio */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Column 1: LED Screen Preview Library (Animations List) */}
-        <div className="lg:col-span-3 bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col gap-3">
+        {/* Column 1: LED Screen Preview Library (Horizontal carousel on mobile, vertical column on desktop) */}
+        <div className="lg:col-span-3 bg-slate-900 border border-slate-800 rounded-xl p-3.5 sm:p-4 flex flex-col gap-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
               LED screen preview
@@ -749,7 +777,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
             </span>
           </div>
 
-          <div className="flex flex-col gap-2.5 max-h-[360px] overflow-y-auto pr-1">
+          <div className="flex flex-row lg:flex-col gap-2.5 overflow-x-auto lg:overflow-y-auto lg:max-h-[360px] pb-1 lg:pb-0 lg:pr-1 no-scrollbar">
             {animations.map((anim) => {
               const isSelected = anim.id === currentAnim?.id;
               const thumb = anim.frames[0]?.dataUrl;
@@ -766,30 +794,30 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
                       currentGifUrl: anim.frames[0]?.dataUrl || config.currentGifUrl,
                     });
                   }}
-                  className={`relative rounded-xl border overflow-hidden cursor-pointer transition bg-slate-950 ${
+                  className={`relative rounded-xl border overflow-hidden cursor-pointer transition bg-slate-950 w-36 lg:w-full shrink-0 ${
                     isSelected
                       ? 'border-amber-500 ring-2 ring-amber-500/30'
                       : 'border-slate-800 hover:border-slate-700'
                   }`}
                 >
-                  <div className="h-24 w-full flex items-center justify-center bg-black p-1.5">
+                  <div className="h-20 sm:h-24 w-full flex items-center justify-center bg-black p-1.5">
                     {thumb ? (
                       <img
                         src={thumb}
                         alt={anim.name}
                         className={`object-cover rounded border border-slate-800 ${
-                          isLandscape ? 'w-32 h-[72px]' : 'h-full w-12'
+                          isLandscape ? 'w-28 sm:w-32 h-[64px] sm:h-[72px]' : 'h-full w-11 sm:w-12'
                         }`}
                       />
                     ) : null}
                   </div>
                   <div
-                    className={`px-2.5 py-1 text-[11px] font-bold flex items-center justify-between ${
+                    className={`px-2 py-1 text-[10px] sm:text-[11px] font-bold flex items-center justify-between gap-1 ${
                       isSelected ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-300'
                     }`}
                   >
                     <span className="truncate">{anim.name}</span>
-                    <span className="font-mono flex-shrink-0">Frames: {anim.frames.length}</span>
+                    <span className="font-mono flex-shrink-0">{anim.frames.length}f</span>
                   </div>
                 </div>
               );
@@ -797,21 +825,27 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
           </div>
 
           {/* New / Import / Delete buttons matching official driver */}
-          <div className="grid grid-cols-3 gap-1.5 pt-2 border-t border-slate-800">
+          <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800">
             <button
               onClick={handleCreateNewAnimation}
-              className="py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
+              className="min-h-[42px] sm:min-h-0 py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>New</span>
             </button>
-            <label className="py-1.5 px-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-slate-950 text-xs font-extrabold flex items-center justify-center gap-1 cursor-pointer">
+            <label
+              className={`min-h-[42px] sm:min-h-0 py-1.5 px-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-slate-950 text-xs font-extrabold flex items-center justify-center gap-1 ${
+                isDecoding || isUploading ? 'opacity-60 pointer-events-none' : 'cursor-pointer'
+              }`}
+              title="Nhập Ảnh, GIF hoặc Video (MP4, MOV, WebM)"
+            >
               <Upload className="w-3.5 h-3.5" />
-              <span>{isDecoding ? '...' : 'Import'}</span>
+              <span>{isDecoding ? `${decodeProgress}%` : 'Import'}</span>
               <input
                 type="file"
                 multiple
-                accept=".gif,.png,.jpg,.jpeg,.webp"
+                disabled={isDecoding || isUploading}
+                accept="image/*,video/*,.gif,.png,.jpg,.jpeg,.webp,.mp4,.mov,.webm,.m4v"
                 onChange={handleImportMedia}
                 className="hidden"
               />
@@ -824,7 +858,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
                 currentAnim.id.startsWith('preset-') ||
                 currentAnim.id === 'blank-1'
               }
-              className="py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-rose-950 text-slate-300 hover:text-rose-400 text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-40 cursor-pointer"
+              className="min-h-[42px] sm:min-h-0 py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-rose-950 text-slate-300 hover:text-rose-400 text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-40 cursor-pointer"
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>Delete</span>
@@ -889,9 +923,9 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
             </div>
           </div>
 
-          {/* Portrait 135x240 Screen Frame (supports click+drag pixel painting when in Editing mode) */}
-          <div className="flex-1 flex flex-col items-center justify-center bg-black/70 rounded-xl p-4 border border-slate-800">
-            <div className="relative p-2.5 rounded-2xl bg-gradient-to-b from-slate-800 to-slate-950 border-2 border-slate-700 shadow-2xl">
+          {/* Portrait / Landscape Screen Frame (supports mouse + touch drawing in Editing mode) */}
+          <div className="flex-1 flex flex-col items-center justify-center bg-black/70 rounded-xl p-3 sm:p-4 border border-slate-800">
+            <div className="relative p-2 sm:p-2.5 rounded-2xl bg-gradient-to-b from-slate-800 to-slate-950 border-2 border-slate-700 shadow-2xl max-w-full">
               <div
                 ref={previewContainerRef}
                 onMouseDown={(e) => {
@@ -907,14 +941,27 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
                 }}
                 onMouseUp={flushPendingBrushEdit}
                 onMouseLeave={flushPendingBrushEdit}
+                onTouchStart={(e) => {
+                  if (viewMode === 'editing' && e.touches[0]) {
+                    isDrawingRef.current = true;
+                    paintAtClientCoords(e.touches[0].clientX, e.touches[0].clientY);
+                  }
+                }}
+                onTouchMove={(e) => {
+                  if (isDrawingRef.current && viewMode === 'editing' && e.touches[0]) {
+                    paintAtClientCoords(e.touches[0].clientX, e.touches[0].clientY);
+                  }
+                }}
+                onTouchEnd={flushPendingBrushEdit}
+                onTouchCancel={flushPendingBrushEdit}
                 className={`relative rounded-lg bg-black border border-slate-700 overflow-hidden flex items-center justify-center select-none ${
-                  isLandscape ? 'w-[312px] h-[175px]' : 'w-[162px] h-[288px]'
-                } ${viewMode === 'editing' ? 'cursor-crosshair' : ''}`}
+                  isLandscape ? 'w-[272px] h-[153px] sm:w-[312px] sm:h-[175px]' : 'w-[162px] h-[288px]'
+                } ${viewMode === 'editing' ? 'cursor-crosshair touch-none' : ''}`}
                 style={{
                   filter: `brightness(${config.brightness / 100})`,
                   transform: `rotate(${config.orientation}deg)`,
                 }}
-                title={viewMode === 'editing' ? 'Bấm & kéo chuột trực tiếp để vẽ lên khung hình' : ''}
+                title={viewMode === 'editing' ? 'Chạm hoặc kéo để vẽ trực tiếp lên khung hình' : ''}
               >
                 {activeFrame ? (
                   <img
@@ -1219,7 +1266,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
                   onClick={() =>
                     onChangeConfig({ ...config, showTimeOverlay: !config.showTimeOverlay })
                   }
-                  className={`px-3 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-2 cursor-pointer ${
+                  className={`min-h-[42px] sm:min-h-0 px-3 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-2 cursor-pointer ${
                     config.showTimeOverlay
                       ? 'bg-cyan-950 text-cyan-300 border border-cyan-700'
                       : 'bg-slate-950/60 text-slate-400 border border-slate-800'
@@ -1236,7 +1283,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
                       showBatteryOverlay: !config.showBatteryOverlay,
                     })
                   }
-                  className={`px-3 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-2 cursor-pointer ${
+                  className={`min-h-[42px] sm:min-h-0 px-3 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-2 cursor-pointer ${
                     config.showBatteryOverlay
                       ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
                       : 'bg-slate-950/60 text-slate-400 border border-slate-800'
@@ -1250,7 +1297,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
                   onClick={() =>
                     onChangeConfig({ ...config, showTempOverlay: !config.showTempOverlay })
                   }
-                  className={`px-3 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-2 cursor-pointer ${
+                  className={`min-h-[42px] sm:min-h-0 px-3 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-2 cursor-pointer ${
                     config.showTempOverlay
                       ? 'bg-amber-950 text-amber-300 border border-amber-700'
                       : 'bg-slate-950/60 text-slate-400 border border-slate-800'

@@ -107,10 +107,10 @@ export const KeyTesterTab: React.FC<KeyTesterTabProps> = ({
   return (
     <div className="flex flex-col gap-6">
       {/* Top Header & Live Stats */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-3.5 sm:gap-4">
         <div>
-          <h3 className="font-bold text-base text-slate-100 flex items-center gap-2">
-            <Keyboard className="w-5 h-5 text-cyan-400" />
+          <h3 className="font-bold text-sm sm:text-base text-slate-100 flex items-center gap-2">
+            <Keyboard className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />
             <span>{t('keyTesterTitle')}</span>
           </h3>
           <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
@@ -120,7 +120,7 @@ export const KeyTesterTab: React.FC<KeyTesterTabProps> = ({
 
         <button
           onClick={onResetTester}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition"
+          className="min-h-[42px] sm:min-h-0 w-full md:w-auto flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition cursor-pointer shrink-0"
         >
           <RotateCcw className="w-3.5 h-3.5 text-cyan-400" />
           <span>{t('resetTester')}</span>

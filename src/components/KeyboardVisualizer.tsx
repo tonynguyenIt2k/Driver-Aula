@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Battery } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Battery, Maximize2, Minimize2 } from 'lucide-react';
 import { DeviceModel, KeyDefinition, LightingConfig, KeyRemapAction, ScreenConfig } from '../types/device';
 import { soundEngine } from '../services/soundEngine';
 
@@ -40,6 +40,21 @@ export const KeyboardVisualizer: React.FC<KeyboardVisualizerProps> = ({
   const [isKnobMuted, setIsKnobMuted] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<string>('10:01');
   const [currentDate, setCurrentDate] = useState<string>('11-13');
+  const [containerWidth, setContainerWidth] = useState<number>(0);
+  const [zoomMode, setZoomMode] = useState<'fit' | 'actual'>('fit');
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const chassisRef = useRef<HTMLDivElement | null>(null);
+  const [chassisSize, setChassisSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const updateWidth = () => setContainerWidth(el.clientWidth);
+    updateWidth();
+    const ro = new ResizeObserver(updateWidth);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const updateTime = () => {
@@ -144,6 +159,26 @@ export const KeyboardVisualizer: React.FC<KeyboardVisualizerProps> = ({
 
   const isS75Pro = device.id === 'aula-s75-pro';
   const isF108Pro = device.id === 'aula-f108-pro';
+
+  useEffect(() => {
+    const el = chassisRef.current;
+    if (!el) return;
+    const measure = () => {
+      setChassisSize({ w: el.offsetWidth, h: el.offsetHeight });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [matrixWidth, matrixHeight, isS75Pro, isF108Pro]);
+
+  const rawChassisWidth = chassisSize.w || matrixWidth + 46;
+  const rawChassisHeight = chassisSize.h || matrixHeight + 56;
+  const needsAutoScale = containerWidth > 0 && rawChassisWidth > containerWidth;
+  const fitScale = needsAutoScale ? Math.max(0.32, containerWidth / rawChassisWidth) : 1;
+  const activeScale = zoomMode === 'fit' ? fitScale : 1;
+  const isScaledDown = activeScale < 0.99;
+
   const currentLayerKeymaps = keymaps[activeLayer] || {};
   const rgbAlpha = lighting.mode === 'off' ? 0 : Math.max(0.18, lighting.brightness / 100);
 
@@ -252,33 +287,88 @@ export const KeyboardVisualizer: React.FC<KeyboardVisualizerProps> = ({
   };
 
   return (
-    <div className="w-full flex flex-col items-center select-none">
-      {/* Outer CNC Keyboard Chassis */}
+    <div ref={wrapperRef} className="w-full flex flex-col items-center select-none gap-2.5">
+      {/* Compact Fit / Zoom 1:1 Control when container is narrower than physical keyboard matrix */}
+      {needsAutoScale && (
+        <div className="w-full flex items-center justify-between gap-2 text-[11px]">
+          <span className="text-slate-400 truncate">
+            {zoomMode === 'fit'
+              ? `Thu gọn ${Math.round(fitScale * 100)}% vừa màn hình`
+              : 'Phóng to 1:1 (kéo ngang để chọn phím)'}
+          </span>
+          <button
+            type="button"
+            onClick={() => setZoomMode((m) => (m === 'fit' ? 'actual' : 'fit'))}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 min-h-[34px] rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-300 font-semibold shrink-0 cursor-pointer"
+          >
+            {zoomMode === 'fit' ? (
+              <>
+                <Maximize2 className="w-3.5 h-3.5" />
+                <span>Phóng to 1:1</span>
+              </>
+            ) : (
+              <>
+                <Minimize2 className="w-3.5 h-3.5" />
+                <span>Vừa màn hình</span>
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* Responsive Scaling Stage */}
       <div
-        className="relative max-w-full overflow-x-auto rounded-[20px] p-3 sm:p-4 transition-all"
+        className={`w-full flex ${isScaledDown ? 'justify-center overflow-hidden' : 'overflow-x-auto pb-1 justify-start xl:justify-center'}`}
         style={
-          isS75Pro
-            ? {
-                background: 'linear-gradient(180deg, #f3f5f9 0%, #e4e8f0 55%, #cfd5e2 100%)',
-                border: '1px solid rgba(255,255,255,0.85)',
-                boxShadow:
-                  '0 28px 65px -16px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(15, 23, 42, 0.25), inset 0 2px 0 rgba(255, 255, 255, 0.95), inset 0 -4px 0 rgba(148, 163, 184, 0.55)',
-              }
-            : isF108Pro
-            ? {
-                background: 'linear-gradient(180deg, #2b313c 0%, #191d25 60%, #11141a 100%)',
-                border: '1px solid rgba(156, 163, 175, 0.22)',
-                boxShadow:
-                  '0 28px 65px -16px rgba(0, 0, 0, 0.92), inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 -4px 0 rgba(2, 6, 23, 0.85)',
-              }
-            : {
-                background: 'linear-gradient(180deg, #1f2738 0%, #141a27 65%, #0d121c 100%)',
-                border: '1px solid rgba(148, 163, 184, 0.16)',
-                boxShadow:
-                  '0 28px 65px -16px rgba(0, 0, 0, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 -4px 0 rgba(2, 6, 23, 0.8)',
-              }
+          isScaledDown
+            ? { height: `${Math.ceil(rawChassisHeight * activeScale) + 6}px` }
+            : undefined
         }
       >
+        <div
+          style={
+            isScaledDown
+              ? {
+                  width: `${Math.ceil(rawChassisWidth * activeScale)}px`,
+                  height: `${Math.ceil(rawChassisHeight * activeScale)}px`,
+                  position: 'relative',
+                }
+              : undefined
+          }
+        >
+          {/* Outer CNC Keyboard Chassis */}
+          <div
+            ref={chassisRef}
+            className="relative w-fit rounded-[20px] p-3 sm:p-4 transition-shadow"
+            style={{
+              ...(isScaledDown
+                ? {
+                    transform: `scale(${activeScale})`,
+                    transformOrigin: 'top left',
+                  }
+                : {}),
+              ...(isS75Pro
+                ? {
+                    background: 'linear-gradient(180deg, #f3f5f9 0%, #e4e8f0 55%, #cfd5e2 100%)',
+                    border: '1px solid rgba(255,255,255,0.85)',
+                    boxShadow:
+                      '0 28px 65px -16px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(15, 23, 42, 0.25), inset 0 2px 0 rgba(255, 255, 255, 0.95), inset 0 -4px 0 rgba(148, 163, 184, 0.55)',
+                  }
+                : isF108Pro
+                ? {
+                    background: 'linear-gradient(180deg, #2b313c 0%, #191d25 60%, #11141a 100%)',
+                    border: '1px solid rgba(156, 163, 175, 0.22)',
+                    boxShadow:
+                      '0 28px 65px -16px rgba(0, 0, 0, 0.92), inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 -4px 0 rgba(2, 6, 23, 0.85)',
+                  }
+                : {
+                    background: 'linear-gradient(180deg, #1f2738 0%, #141a27 65%, #0d121c 100%)',
+                    border: '1px solid rgba(148, 163, 184, 0.16)',
+                    boxShadow:
+                      '0 28px 65px -16px rgba(0, 0, 0, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 -4px 0 rgba(2, 6, 23, 0.8)',
+                  }),
+            }}
+          >
         {/* Subtle laser-etched side tri-mode indicator on S75 Pro top-right bezel */}
         {isS75Pro && (
           <div className="flex items-center justify-end pr-2 pb-1.5 text-[8px] font-mono font-bold tracking-widest text-slate-500/80">
@@ -615,6 +705,8 @@ export const KeyboardVisualizer: React.FC<KeyboardVisualizerProps> = ({
               );
             })}
           </div>
+        </div>
+      </div>
         </div>
       </div>
     </div>

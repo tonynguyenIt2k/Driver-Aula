@@ -193,7 +193,7 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
   return (
     <div className="flex flex-col gap-6">
       {/* Top Layer Selector Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900 p-3 rounded-xl border border-slate-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 bg-slate-900 p-3 rounded-xl border border-slate-800">
         <div className="flex items-center gap-2">
           <Layers className="w-4 h-4 text-cyan-400" />
           <span className="text-xs font-bold text-slate-300">
@@ -201,12 +201,12 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
           </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
           {[0, 1, 2, 3].map((l) => (
             <button
               key={l}
               onClick={() => onSelectLayer(l)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+              className={`min-h-[40px] sm:min-h-0 px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
                 activeLayer === l
                   ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 shadow-md shadow-cyan-500/20'
                   : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
@@ -279,11 +279,11 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
       )}
 
       {/* Selected Key Status Card */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 sm:p-4 flex flex-col md:flex-row md:items-center justify-between gap-3.5 sm:gap-4">
         {selectedKey ? (
-          <div className="flex items-center gap-4 w-full md:w-auto">
+          <div className="flex items-center gap-3.5 sm:gap-4 w-full md:w-auto">
             <div
-              className={`w-14 h-14 rounded-xl bg-slate-800 border-2 flex flex-col items-center justify-center font-bold text-lg shadow-lg ${
+              className={`w-14 h-14 shrink-0 rounded-xl bg-slate-800 border-2 flex flex-col items-center justify-center font-bold text-base sm:text-lg shadow-lg ${
                 currentAction
                   ? 'border-amber-400 text-amber-300 shadow-amber-500/20'
                   : 'border-cyan-500 text-cyan-300 shadow-cyan-500/20'
@@ -294,18 +294,18 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
                 {selectedKey.code}
               </span>
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="text-xs text-slate-400 font-medium">
                 {t('selectedKey')}
               </div>
-              <div className="text-sm font-bold text-slate-100 flex flex-wrap items-center gap-2">
+              <div className="text-sm font-bold text-slate-100 flex flex-wrap items-center gap-2 mt-0.5">
                 <span>{selectedKey.label}</span>
                 {currentAction ? (
-                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-500/60 font-semibold">
+                  <span className="text-xs px-2 py-0.5 rounded-md bg-amber-950/80 text-amber-300 border border-amber-500/60 font-semibold">
                     {t('assignedTo')}: {currentAction.label} ({currentAction.category})
                   </span>
                 ) : (
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-normal">
+                  <span className="text-xs px-2 py-0.5 rounded-md bg-slate-800 text-slate-400 font-normal">
                     {t('defaultAction')}
                   </span>
                 )}
@@ -314,16 +314,16 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
           </div>
         ) : (
           <div className="text-xs text-cyan-400/90 font-medium flex items-center gap-2">
-            <Command className="w-4 h-4" />
+            <Command className="w-4 h-4 shrink-0" />
             <span>{t('clickToRemapPrompt')}</span>
           </div>
         )}
 
         {selectedKey && (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 w-full md:w-auto">
             <button
               onClick={() => setIsCapturingKey((v) => !v)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition cursor-pointer ${
+              className={`min-h-[42px] sm:min-h-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border transition cursor-pointer ${
                 isCapturingKey
                   ? 'bg-cyan-500 text-slate-950 border-cyan-400 animate-pulse'
                   : 'bg-slate-800 hover:bg-slate-700 text-cyan-300 border-cyan-700/60'
@@ -344,7 +344,7 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
             {currentAction && (
               <button
                 onClick={() => onRemap(null)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-rose-400 border border-slate-700 transition cursor-pointer"
+                className="min-h-[42px] sm:min-h-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-rose-400 border border-slate-700 transition cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>{t('restoreKeyDefault')}</span>
@@ -355,8 +355,8 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
       </div>
 
       {/* Remap Options Panel */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-        <h3 className="text-sm font-bold text-slate-200 mb-4 flex items-center gap-2">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 sm:p-5">
+        <h3 className="text-sm font-bold text-slate-200 mb-3 sm:mb-4 flex flex-wrap items-center gap-2">
           <span>{t('remapDrawerTitle')}</span>
           {!selectedKey && (
             <span className="text-xs font-normal text-amber-400">
@@ -365,15 +365,15 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
           )}
         </h3>
 
-        {/* Category Tabs */}
-        <div className="flex flex-wrap gap-2 mb-4 border-b border-slate-800 pb-3">
+        {/* Category Tabs (Horizontal scrollable strip on mobile) */}
+        <div className="flex flex-nowrap overflow-x-auto no-scrollbar md:flex-wrap gap-2 mb-4 border-b border-slate-800 pb-3">
           {categories.map((c) => {
             const Icon = c.icon;
             return (
               <button
                 key={c.id}
                 onClick={() => setActiveCategory(c.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                className={`min-h-[40px] sm:min-h-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition whitespace-nowrap shrink-0 cursor-pointer ${
                   activeCategory === c.id
                     ? 'bg-cyan-500 text-slate-950 font-bold shadow-sm'
                     : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
@@ -387,7 +387,7 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
         </div>
 
         {/* Category Items Grid */}
-        <div className="max-h-64 overflow-y-auto p-1">
+        <div className="max-h-72 sm:max-h-64 overflow-y-auto p-0.5 sm:p-1">
           {activeCategory === 'standard' && (
             <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
               {standardKeys.map((item) => {
@@ -404,7 +404,7 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
                         category: /^F\d+$/.test(item.value) ? 'F-Row' : 'Standard',
                       })
                     }
-                    className={`p-2.5 rounded-lg border text-xs font-bold font-mono transition disabled:opacity-40 disabled:cursor-not-allowed ${
+                    className={`min-h-[44px] sm:min-h-0 p-2.5 rounded-lg border text-xs font-bold font-mono transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
                       active
                         ? 'bg-amber-500/25 border-amber-400 text-amber-300 ring-1 ring-amber-400'
                         : 'bg-slate-800/80 hover:bg-cyan-600/30 hover:border-cyan-500 border-slate-700/80 text-slate-200'
@@ -433,7 +433,7 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
                         category: 'F-Row',
                       })
                     }
-                    className={`p-2.5 rounded-lg border text-xs font-bold font-mono transition disabled:opacity-40 disabled:cursor-not-allowed ${
+                    className={`min-h-[44px] sm:min-h-0 p-2.5 rounded-lg border text-xs font-bold font-mono transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
                       active
                         ? 'bg-amber-500/25 border-amber-400 text-amber-300 ring-1 ring-amber-400'
                         : 'bg-slate-800/80 hover:bg-cyan-600/30 hover:border-cyan-500 border-slate-700/80 text-cyan-300'
@@ -462,7 +462,7 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
                         category: 'Modifier',
                       })
                     }
-                    className={`p-2.5 rounded-lg border text-xs font-bold transition disabled:opacity-40 disabled:cursor-not-allowed text-left flex items-center justify-between ${
+                    className={`min-h-[44px] sm:min-h-0 p-2.5 rounded-lg border text-xs font-bold transition disabled:opacity-40 disabled:cursor-not-allowed text-left flex items-center justify-between cursor-pointer ${
                       active
                         ? 'bg-amber-500/25 border-amber-400 text-amber-300 ring-1 ring-amber-400'
                         : 'bg-slate-800/80 hover:bg-cyan-600/30 hover:border-cyan-500 border-slate-700/80 text-slate-200'
@@ -491,7 +491,7 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
                         category: 'Media',
                       })
                     }
-                    className={`p-2.5 rounded-lg border text-xs font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-left ${
+                    className={`min-h-[44px] sm:min-h-0 p-2.5 rounded-lg border text-xs font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-left cursor-pointer ${
                       active
                         ? 'bg-amber-500/25 border-amber-400 text-amber-300 ring-1 ring-amber-400'
                         : 'bg-slate-800/80 hover:bg-cyan-600/30 hover:border-cyan-500 border-slate-700/80 text-slate-200'
@@ -520,7 +520,7 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
                         category: 'Mouse',
                       })
                     }
-                    className={`p-2.5 rounded-lg border text-xs font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-left ${
+                    className={`min-h-[44px] sm:min-h-0 p-2.5 rounded-lg border text-xs font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-left cursor-pointer ${
                       active
                         ? 'bg-amber-500/25 border-amber-400 text-amber-300 ring-1 ring-amber-400'
                         : 'bg-slate-800/80 hover:bg-cyan-600/30 hover:border-cyan-500 border-slate-700/80 text-slate-200'
@@ -555,7 +555,7 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
                             category: 'Macro',
                           })
                         }
-                        className={`p-3 rounded-lg border text-xs transition disabled:opacity-40 disabled:cursor-not-allowed text-left flex flex-col gap-1 ${
+                        className={`min-h-[48px] p-3 rounded-lg border text-xs transition disabled:opacity-40 disabled:cursor-not-allowed text-left flex flex-col gap-1 cursor-pointer ${
                           active
                             ? 'bg-amber-500/25 border-amber-400 text-amber-200 ring-1 ring-amber-400'
                             : 'bg-slate-800/80 hover:bg-purple-950/60 hover:border-purple-500 border-slate-700/80 text-slate-200'
@@ -592,7 +592,7 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
                         category: 'RGB',
                       })
                     }
-                    className={`p-2.5 rounded-lg border text-xs font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-left ${
+                    className={`min-h-[44px] sm:min-h-0 p-2.5 rounded-lg border text-xs font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed text-left cursor-pointer ${
                       active
                         ? 'bg-amber-500/25 border-amber-400 text-amber-300 ring-1 ring-amber-400'
                         : 'bg-slate-800/80 hover:bg-cyan-600/30 hover:border-cyan-500 border-slate-700/80 text-slate-200'
@@ -606,12 +606,12 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
           )}
 
           {activeCategory === 'disable' && (
-            <div className="p-4 bg-slate-800/70 border border-slate-700/70 rounded-xl flex items-center justify-between">
+            <div className="p-4 bg-slate-800/70 border border-slate-700/70 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h4 className="font-bold text-xs text-slate-200">
                   {t('categoryDisable')}
                 </h4>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-slate-400 mt-0.5">
                   Phím này sẽ bị vô hiệu hóa hoàn toàn khi được nhấn.
                 </p>
               </div>
@@ -625,7 +625,7 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
                     category: 'System',
                   })
                 }
-                className={`px-4 py-2 rounded-lg text-white font-bold text-xs transition disabled:opacity-40 ${
+                className={`min-h-[44px] sm:min-h-0 px-4 py-2 rounded-lg text-white font-bold text-xs transition disabled:opacity-40 cursor-pointer shrink-0 ${
                   currentAction?.type === 'disabled'
                     ? 'bg-amber-600 hover:bg-amber-500 ring-1 ring-amber-300'
                     : 'bg-rose-600 hover:bg-rose-500'
