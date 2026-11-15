@@ -31,6 +31,7 @@ import {
   KeyRemapAction,
   Macro,
   MouseConfig,
+  ScreenAnimation,
   ScreenConfig,
   SystemSettings,
   Language,
@@ -44,6 +45,11 @@ import {
 
 import { TRANSLATIONS } from './data/translations';
 import { webhidService, ConnectedDeviceInfo } from './services/webhid';
+import {
+  encodeFramesToRgb565,
+  AULA_TFT_WIDTH,
+  AULA_TFT_HEIGHT,
+} from './services/gifEncoder';
 import { soundEngine } from './services/soundEngine';
 import { auth } from './firebase';
 import {
@@ -66,6 +72,10 @@ import {
   subscribeRemoteCommands,
   completeRemoteCommand,
   cleanupRemoteCommand,
+  saveScreenAnimationToCloud,
+  deleteScreenAnimationFromCloud,
+  loadUserScreenAnimationsFromCloud,
+  subscribeUserScreenAnimations,
   CloudBridgeStatus,
   CloudDeviceProfile,
   RemoteCommandType,
@@ -257,6 +267,7 @@ export default function App() {
   const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatus>('idle');
   const [lastCloudSavedAt, setLastCloudSavedAt] = useState<number | null>(null);
   const [remoteBridge, setRemoteBridge] = useState<CloudBridgeStatus | null>(null);
+  const [cloudAnimations, setCloudAnimations] = useState<ScreenAnimation[]>([]);
 
   const clientIdRef = useRef<string>(
     `cli_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -300,6 +311,7 @@ export default function App() {
     mouseConfig,
     screenConfig,
     macros,
+    cloudAnimations,
     lang,
   });
   latestStateRef.current = {
@@ -312,6 +324,7 @@ export default function App() {
     mouseConfig,
     screenConfig,
     macros,
+    cloudAnimations,
     lang,
   };
 
@@ -443,6 +456,7 @@ export default function App() {
       if (!user) {
         setCloudSessionUid(null);
         setRemoteBridge(null);
+        setCloudAnimations([]);
         setCloudSyncStatus('idle');
         profileHydratedKeyRef.current = '';
         macrosHydratedUidRef.current = '';
@@ -745,7 +759,17 @@ export default function App() {
         setMouseConfig(normalizedProf.mouseConfig);
       }
       if (normalizedProf.screenSettings) {
-        setScreenConfig((prev) => ({ ...prev, ...normalizedProf.screenSettings }));
+        const nextActiveAnimId = normalizedProf.screenSettings.activeAnimationId;
+        const matchedAnim = nextActiveAnimId
+          ? latestStateRef.current.cloudAnimations.find((a) => a.id === nextActiveAnimId)
+          : undefined;
+        setScreenConfig((prev) => ({
+          ...prev,
+          ...normalizedProf.screenSettings,
+          ...(matchedAnim?.frames?.[0]?.dataUrl
+            ? { currentGifUrl: matchedAnim.frames[0].dataUrl }
+            : {}),
+        }));
       }
       setTimeout(() => {
         isHydratingProfileRef.current = false;
@@ -879,6 +903,33 @@ export default function App() {
     };
   }, [cloudSessionUid]);
 
+  // Load & subscribe user screen animations/wallpapers in real time across Phone <-> PC
+  useEffect(() => {
+    if (!cloudSessionUid) return;
+    let active = true;
+
+    const unsubAnims = subscribeUserScreenAnimations(cloudSessionUid, (anims) => {
+      if (!active) return;
+      setCloudAnimations(anims);
+      const activeId = latestStateRef.current.screenConfig.activeAnimationId;
+      if (activeId) {
+        const matched = anims.find((a) => a.id === activeId);
+        if (matched?.frames?.[0]?.dataUrl) {
+          setScreenConfig((prev) =>
+            prev.currentGifUrl === matched.frames[0].dataUrl
+              ? prev
+              : { ...prev, currentGifUrl: matched.frames[0].dataUrl }
+          );
+        }
+      }
+    });
+
+    return () => {
+      active = false;
+      unsubAnims();
+    };
+  }, [cloudSessionUid]);
+
   // Subscribe to Remote Hardware Commands (Phone -> Firebase -> PC WebHID Bridge)
   useEffect(() => {
     if (!cloudSessionUid) return;
@@ -955,6 +1006,33 @@ export default function App() {
               res = await webhidService.applyMouseConfig(mouseCfg);
             } else if (cmd.type === 'sync_time') {
               res = await webhidService.syncTime(new Date());
+            } else if (cmd.type === 'upload_screen') {
+              const targetW = devModel.screenResolution?.width ?? AULA_TFT_WIDTH;
+              const targetH = devModel.screenResolution?.height ?? AULA_TFT_HEIGHT;
+              let animToUpload =
+                latestStateRef.current.cloudAnimations.find((a) => a.id === cmd.animId) || null;
+              if (!animToUpload) {
+                const freshAnims = await loadUserScreenAnimationsFromCloud(cloudSessionUid);
+                animToUpload =
+                  freshAnims.find((a) => a.id === cmd.animId) || freshAnims[0] || null;
+              }
+              if (!animToUpload || animToUpload.frames.length === 0) {
+                res = {
+                  ok: false,
+                  message: 'Không tìm thấy ảnh/hoạt ảnh trên Firebase để nạp xuống bàn phím.',
+                };
+              } else {
+                const encoded = await encodeFramesToRgb565(
+                  animToUpload.frames,
+                  undefined,
+                  targetW,
+                  targetH
+                );
+                res = await webhidService.uploadScreenBytes(
+                  encoded.framesRgb565,
+                  encoded.frameDelaysMs
+                );
+              }
             } else if (cmd.type === 'reset_keys') {
               res = await webhidService.factoryResetHardware(false);
             } else if (cmd.type === 'factory_reset') {
@@ -1046,6 +1124,7 @@ export default function App() {
     screenConfig.showTimeOverlay,
     screenConfig.showBatteryOverlay,
     screenConfig.showTempOverlay,
+    screenConfig.activeAnimationId,
   ]);
 
   // Debounced auto-save macros to Firestore
@@ -1220,6 +1299,7 @@ export default function App() {
       keymaps?: Record<number, Record<string, KeyRemapAction>>;
       mouseConfig?: MouseConfig;
       layer?: number;
+      animId?: string;
     }
   ) => {
     if (!cloudSessionUid) {
@@ -1256,6 +1336,7 @@ export default function App() {
         deviceId: st.selectedDevice.id,
         profileSlot: st.activeProfile,
         layer: override?.layer ?? st.activeLayer,
+        animId: override?.animId,
       });
       sentCmdIdsRef.current.add(cmdId);
       setCloudSyncStatus('synced');
@@ -1428,6 +1509,51 @@ export default function App() {
       return;
     }
     showToast('Chưa kết nối bàn phím AULA qua WebHID thật hoặc đăng nhập Google.');
+  };
+
+  const handleSaveCloudAnimation = async (anim: ScreenAnimation) => {
+    if (!cloudSessionUid) return;
+    setCloudSyncStatus('syncing');
+    try {
+      const w = selectedDevice.screenResolution?.width ?? AULA_TFT_WIDTH;
+      const h = selectedDevice.screenResolution?.height ?? AULA_TFT_HEIGHT;
+      const saved = await saveScreenAnimationToCloud(cloudSessionUid, anim, w, h);
+      setCloudAnimations((prev) => {
+        const filtered = prev.filter((item) => item.id !== saved.id);
+        return [saved, ...filtered].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      });
+      setCloudSyncStatus('synced');
+      setLastCloudSavedAt(Date.now());
+    } catch (err) {
+      console.error('Save screen animation to cloud failed:', err);
+      setCloudSyncStatus('error');
+      showToast('Không thể đồng bộ ảnh lên Firebase.');
+    }
+  };
+
+  const handleDeleteCloudAnimation = async (animId: string) => {
+    if (!cloudSessionUid) return;
+    try {
+      await deleteScreenAnimationFromCloud(cloudSessionUid, animId);
+      setCloudAnimations((prev) => prev.filter((item) => item.id !== animId));
+    } catch (err) {
+      console.error('Delete screen animation failed:', err);
+    }
+  };
+
+  const handleRemoteUploadScreenAction = async (anim: ScreenAnimation) => {
+    if (!cloudSessionUid) {
+      showToast('Chưa kết nối bàn phím qua WebHID thật hoặc đăng nhập Google.');
+      return;
+    }
+    const w = selectedDevice.screenResolution?.width ?? AULA_TFT_WIDTH;
+    const h = selectedDevice.screenResolution?.height ?? AULA_TFT_HEIGHT;
+    const saved = await saveScreenAnimationToCloud(cloudSessionUid, anim, w, h);
+    setCloudAnimations((prev) => {
+      const filtered = prev.filter((item) => item.id !== saved.id);
+      return [saved, ...filtered].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    });
+    await sendCommandFromRemote('upload_screen', { animId: saved.id });
   };
 
   // Custom Matrix Painter Key Click & Group Paint
@@ -1947,6 +2073,10 @@ export default function App() {
                 screenResolution={selectedDevice.screenResolution}
                 deviceInfo={deviceInfo}
                 isConnected={isConnected}
+                cloudAnimations={cloudSessionUid ? cloudAnimations : undefined}
+                onSaveCloudAnimation={cloudSessionUid ? handleSaveCloudAnimation : undefined}
+                onDeleteCloudAnimation={cloudSessionUid ? handleDeleteCloudAnimation : undefined}
+                onRemoteUploadScreen={cloudSessionUid ? handleRemoteUploadScreenAction : undefined}
                 onRequestHIDConnect={() => handleConnectHID(false)}
                 onSyncTime={handleSyncTimeAction}
                 onChangeConfig={setScreenConfig}

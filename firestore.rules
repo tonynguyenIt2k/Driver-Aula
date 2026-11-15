@@ -79,6 +79,20 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidScreenAnimation(data, userId, animId) {
+      return data.keys().hasAll(['ownerId', 'animId', 'name', 'width', 'height', 'frames', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'animId', 'name', 'width', 'height', 'frames', 'clientCreatedAt', 'createdAt', 'updatedAt'])
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId == userId && data.ownerId == request.auth.uid
+        && data.animId is string && data.animId.size() >= 1 && data.animId.size() <= 128 && data.animId == animId
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
+        && data.width is int && data.width >= 32 && data.width <= 640
+        && data.height is int && data.height >= 32 && data.height <= 640
+        && data.frames is list && data.frames.size() >= 1 && data.frames.size() <= 141 && data.frames[0] is map
+        && (!('clientCreatedAt' in data) || data.clientCreatedAt is number)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     function isValidBridgeStatus(data, userId) {
       return data.keys().hasAll(['ownerId', 'online', 'hidConnected', 'deviceId', 'productName', 'connectionType', 'clientHostId', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly(['ownerId', 'online', 'hidConnected', 'deviceId', 'productName', 'connectionType', 'batteryLevel', 'clientHostId', 'createdAt', 'updatedAt'])
@@ -96,7 +110,7 @@ service cloud.firestore {
 
     function isValidRemoteCommand(data, userId, commandId) {
       return data.keys().hasAll(['ownerId', 'commandId', 'senderId', 'type', 'deviceId', 'profileSlot', 'status', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['ownerId', 'commandId', 'senderId', 'type', 'deviceId', 'profileSlot', 'layer', 'status', 'resultMessage', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'commandId', 'senderId', 'type', 'deviceId', 'profileSlot', 'layer', 'animId', 'status', 'resultMessage', 'createdAt', 'updatedAt'])
         && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId == userId && data.ownerId == request.auth.uid
         && data.commandId is string && data.commandId.size() >= 1 && data.commandId.size() <= 128 && data.commandId == commandId
         && data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 64 && data.senderId.matches('^[a-zA-Z0-9_\\-]+$')
@@ -107,12 +121,14 @@ service cloud.firestore {
           || data.type == 'apply_system'
           || data.type == 'apply_mouse'
           || data.type == 'sync_time'
+          || data.type == 'upload_screen'
           || data.type == 'reset_keys'
           || data.type == 'factory_reset'
         )
         && data.deviceId is string && data.deviceId.size() >= 1 && data.deviceId.size() <= 64 && data.deviceId.matches('^[a-zA-Z0-9_\\-]+$')
         && data.profileSlot is int && data.profileSlot >= 1 && data.profileSlot <= 3
         && (!('layer' in data) || (data.layer is int && data.layer >= 0 && data.layer <= 3))
+        && (!('animId' in data) || (data.animId is string && data.animId.size() >= 1 && data.animId.size() <= 128 && data.animId.matches('^[a-zA-Z0-9_\\-]+$')))
         && data.status is string && data.status.size() <= 16 && (data.status == 'pending' || data.status == 'completed' || data.status == 'failed')
         && (!('resultMessage' in data) || (data.resultMessage is string && data.resultMessage.size() <= 300))
         && data.createdAt is timestamp
@@ -203,6 +219,29 @@ service cloud.firestore {
           && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'repeatMode', 'actions', 'clientCreatedAt', 'updatedAt'])
           && exists(/databases/$(database)/documents/users/$(userId));
         allow delete: if isValidId(userId) && isValidId(macroId) && isVerifiedOwner(userId);
+      }
+
+      match /screenAnimations/{animId} {
+        allow get: if isValidId(userId) && isValidId(animId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(userId)
+          && isValidId(animId)
+          && isVerifiedOwner(userId)
+          && isValidScreenAnimation(incoming(), userId, animId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow update: if isValidId(userId)
+          && isValidId(animId)
+          && isVerifiedOwner(userId)
+          && isValidScreenAnimation(incoming(), userId, animId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().animId == existing().animId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'width', 'height', 'frames', 'clientCreatedAt', 'updatedAt'])
+          && exists(/databases/$(database)/documents/users/$(userId));
+        allow delete: if isValidId(userId) && isValidId(animId) && isVerifiedOwner(userId);
       }
 
       match /bridge/{docId} {

@@ -125,12 +125,16 @@ export interface ScreenAnimation {
   id: string;
   name: string;
   frames: ScreenFrame[];
+  width?: number;
+  height?: number;
+  createdAt?: number;
 }
 
 export interface ScreenConfig {
   brightness: number; // 0 - 100
   fps: number; // 5 - 30
   currentGifUrl: string;
+  activeAnimationId?: string;
   orientation: 0 | 90 | 180 | 270;
   showTimeOverlay: boolean;
   showBatteryOverlay: boolean;

@@ -233,6 +233,7 @@
             "apply_system",
             "apply_mouse",
             "sync_time",
+            "upload_screen",
             "reset_keys",
             "factory_reset"
           ],
@@ -248,6 +249,11 @@
         },
         "layer": {
           "type": "integer"
+        },
+        "animId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
         "status": {
           "type": "string",
@@ -268,6 +274,49 @@
         }
       },
       "required": ["ownerId", "commandId", "senderId", "type", "deviceId", "profileSlot", "status", "createdAt", "updatedAt"]
+    },
+    "ScreenAnimationItem": {
+      "title": "TFT Screen Animation / Wallpaper",
+      "description": "User-imported or custom-edited TFT screen wallpaper / GIF animation synced across Phone and PC.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "animId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "frames": {
+          "type": "array"
+        },
+        "clientCreatedAt": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "animId", "name", "width", "height", "frames", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -294,6 +343,10 @@
     "/users/{userId}/commands/{commandId}": {
       "schema": { "$ref": "#/entities/RemoteCommand" },
       "description": "Remote hardware command queue executed by the signed-in user's PC WebHID bridge."
+    },
+    "/users/{userId}/screenAnimations/{animId}": {
+      "schema": { "$ref": "#/entities/ScreenAnimationItem" },
+      "description": "User-imported or edited TFT screen wallpapers and GIF animations synced across devices."
     }
   }
 }

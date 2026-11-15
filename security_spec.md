@@ -7,7 +7,8 @@
 4. All arrays (`actions`) are bounded (`<= 128` elements) and validated (`actions[0] is map`). All strings have strict `.size()` limits, and all IDs match `^[a-zA-Z0-9_\-]+$`.
 5. All `list` queries on subcollections explicitly check `resource.data.ownerId == request.auth.uid`.
 6. Desktop WebHID bridge status (`/users/{userId}/bridge/status`) is strictly single-document (`docId == 'status'`), forbids `list`, requires parent `/users/{userId}`, and restricts `ownerId` and `createdAt` immutability.
-7. Remote hardware commands (`/users/{userId}/commands/{commandId}`) must be created with `status == 'pending'`, can only transition once from `'pending'` to `'completed'` or `'failed'` (terminal state locking), and forbid mutating `ownerId`, `commandId`, `senderId`, `type`, `deviceId`, `profileSlot`, or `createdAt`.
+7. Remote hardware commands (`/users/{userId}/commands/{commandId}`) must be created with `status == 'pending'`, can only transition once from `'pending'` to `'completed'` or `'failed'` (terminal state locking), and forbid mutating `ownerId`, `commandId`, `senderId`, `type`, `deviceId`, `profileSlot`, `animId`, or `createdAt`.
+8. Screen animations (`/users/{userId}/screenAnimations/{animId}`) require the parent `/users/{userId}` document to exist, enforce `ownerId == request.auth.uid`, bound `frames` (`1..141` elements with `frames[0] is map`), bound `width`/`height` (`32..640`), forbid mutating `ownerId`/`animId`/`createdAt`, and enforce `list` queries checking `resource.data.ownerId == request.auth.uid`.
 
 ## 2. The "Dirty Dozen" Payloads (Expected: PERMISSION_DENIED)
 1. Unauthenticated read/write to `/users/uid1/profiles/aula-s75-pro_p1`.

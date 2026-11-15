@@ -35,6 +35,10 @@ interface ScreenTabProps {
   screenResolution?: { width: number; height: number };
   deviceInfo?: ConnectedDeviceInfo;
   isConnected?: boolean;
+  cloudAnimations?: ScreenAnimation[];
+  onSaveCloudAnimation?: (anim: ScreenAnimation) => Promise<void> | void;
+  onDeleteCloudAnimation?: (animId: string) => Promise<void> | void;
+  onRemoteUploadScreen?: (anim: ScreenAnimation) => Promise<void> | void;
   onRequestHIDConnect?: () => void;
   onSyncTime?: () => Promise<void> | void;
   onChangeConfig: (newConfig: ScreenConfig) => void;
@@ -89,6 +93,10 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
   screenResolution,
   deviceInfo,
   isConnected,
+  cloudAnimations,
+  onSaveCloudAnimation,
+  onDeleteCloudAnimation,
+  onRemoteUploadScreen,
   onRequestHIDConnect,
   onSyncTime,
   onChangeConfig,
@@ -99,8 +107,9 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
   const tftHeight = screenResolution?.height ?? AULA_TFT_HEIGHT;
   const isLandscape = tftWidth > tftHeight;
 
-  const [animations, setAnimations] = useState<ScreenAnimation[]>([]);
-  const [selectedAnimId, setSelectedAnimId] = useState<string>('');
+  const [presetAnimations, setPresetAnimations] = useState<ScreenAnimation[]>([]);
+  const [localAnimations, setLocalAnimations] = useState<ScreenAnimation[]>([]);
+  const [selectedAnimId, setSelectedAnimId] = useState<string>(config.activeAnimationId || '');
   const [selectedFrameIndex, setSelectedFrameIndex] = useState<number>(0);
   const [playIndex, setPlayIndex] = useState<number>(0);
 
@@ -128,7 +137,25 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
   const [payloadSizeKb, setPayloadSizeKb] = useState<number | null>(null);
 
   const isDrawingRef = useRef<boolean>(false);
+  const pendingEditedAnimRef = useRef<ScreenAnimation | null>(null);
   const previewContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Merge cloud-synced custom animations with local/preset animations
+  const animations = React.useMemo(() => {
+    const customMap = new Map<string, ScreenAnimation>();
+    for (const a of cloudAnimations || []) {
+      customMap.set(a.id, a);
+    }
+    for (const a of localAnimations) {
+      if (!customMap.has(a.id)) {
+        customMap.set(a.id, a);
+      }
+    }
+    const customs = Array.from(customMap.values()).sort(
+      (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+    );
+    return [...customs, ...presetAnimations.filter((p) => !customMap.has(p.id))];
+  }, [cloudAnimations, localAnimations, presetAnimations]);
 
   // Initialize built-in presets for the active device screen aspect ratio
   useEffect(() => {
@@ -138,7 +165,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
       for (const p of DEFAULT_PRESET_URLS) {
         try {
           const frames = await decodeSourceToFrames(p.url, 0, 141, tftWidth, tftHeight);
-          loaded.push({ id: p.id, name: p.name, frames });
+          loaded.push({ id: p.id, name: p.name, frames, width: tftWidth, height: tftHeight });
         } catch {
           // Ignore if offline
         }
@@ -149,21 +176,37 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
           id: 'blank-1',
           name: 'AULA Custom',
           frames: [createSolidFrame(tftWidth, tftHeight)],
+          width: tftWidth,
+          height: tftHeight,
         });
       }
-      setAnimations(loaded);
-      setSelectedAnimId(loaded[0].id);
+      setPresetAnimations(loaded);
+      setSelectedAnimId((prev) => {
+        if (config.activeAnimationId) return config.activeAnimationId;
+        if (prev) return prev;
+        return loaded[0].id;
+      });
       setSelectedFrameIndex(0);
       setPlayIndex(0);
-      if (loaded[0].frames[0]) {
-        onChangeConfig({ ...config, currentGifUrl: loaded[0].frames[0].dataUrl });
-      }
     };
     initPresets();
     return () => {
       mounted = false;
     };
   }, [tftWidth, tftHeight]);
+
+  // Follow remote activeAnimationId changes (e.g. Phone imported/selected a wallpaper)
+  useEffect(() => {
+    if (config.activeAnimationId && animations.some((a) => a.id === config.activeAnimationId)) {
+      if (selectedAnimId !== config.activeAnimationId) {
+        setSelectedAnimId(config.activeAnimationId);
+        setSelectedFrameIndex(0);
+        setPlayIndex(0);
+      }
+    } else if (!selectedAnimId && animations[0]) {
+      setSelectedAnimId(animations[0].id);
+    }
+  }, [config.activeAnimationId, animations]);
 
   const currentAnim = animations.find((a) => a.id === selectedAnimId) || animations[0];
   const currentFrames = currentAnim?.frames || [];
@@ -206,6 +249,16 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
     setPayloadSizeKb(Number((total / 1024).toFixed(1)));
   }, [currentAnim?.id, currentFrames.length, tftWidth, tftHeight]);
 
+  const persistAnimationUpdate = async (updated: ScreenAnimation, syncToCloud = true) => {
+    setLocalAnimations((prev) => {
+      const exists = prev.some((a) => a.id === updated.id);
+      return exists ? prev.map((a) => (a.id === updated.id ? updated : a)) : [updated, ...prev];
+    });
+    if (syncToCloud && onSaveCloudAnimation && !updated.id.startsWith('preset-') && updated.id !== 'blank-1') {
+      await onSaveCloudAnimation(updated);
+    }
+  };
+
   const handleImportMedia = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []) as File[];
     if (files.length === 0) return;
@@ -228,17 +281,33 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
 
       const newAnim: ScreenAnimation = {
         id: `anim-${Date.now()}`,
-        name: files[0].name.replace(/\.[^.]+$/, ''),
+        name: files[0].name.replace(/\.[^.]+$/, '') || 'Custom',
+        width: tftWidth,
+        height: tftHeight,
         frames: mergedFrames,
+        createdAt: Date.now(),
       };
 
-      setAnimations((prev) => [newAnim, ...prev]);
+      setLocalAnimations((prev) => [newAnim, ...prev]);
       setSelectedAnimId(newAnim.id);
       setSelectedFrameIndex(0);
       setPlayIndex(0);
-      onNotify?.(
-        `Đã nhập "${newAnim.name}" (${mergedFrames.length} khung hình ${tftWidth}×${tftHeight})`
-      );
+      onChangeConfig({
+        ...config,
+        activeAnimationId: newAnim.id,
+        currentGifUrl: mergedFrames[0]?.dataUrl || config.currentGifUrl,
+      });
+
+      if (onSaveCloudAnimation) {
+        await onSaveCloudAnimation(newAnim);
+        onNotify?.(
+          `Đã nhập & đồng bộ "${newAnim.name}" (${mergedFrames.length} khung ${tftWidth}×${tftHeight}) lên Firebase!`
+        );
+      } else {
+        onNotify?.(
+          `Đã nhập "${newAnim.name}" (${mergedFrames.length} khung hình ${tftWidth}×${tftHeight})`
+        );
+      }
     } catch (err: any) {
       setUploadError(err?.message || 'Không thể giải mã tệp ảnh/GIF đã chọn.');
     } finally {
@@ -251,21 +320,36 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
     const newAnim: ScreenAnimation = {
       id: `anim-${Date.now()}`,
       name: `Custom ${animations.length + 1}`,
+      width: tftWidth,
+      height: tftHeight,
       frames: [createSolidFrame(tftWidth, tftHeight, '#090d16')],
+      createdAt: Date.now(),
     };
-    setAnimations((prev) => [newAnim, ...prev]);
+    setLocalAnimations((prev) => [newAnim, ...prev]);
     setSelectedAnimId(newAnim.id);
     setSelectedFrameIndex(0);
     setViewMode('editing');
+    onChangeConfig({
+      ...config,
+      activeAnimationId: newAnim.id,
+      currentGifUrl: newAnim.frames[0]?.dataUrl || config.currentGifUrl,
+    });
+    onSaveCloudAnimation?.(newAnim);
   };
 
   const handleDeleteAnimation = (id: string) => {
-    if (animations.length <= 1) return;
+    if (animations.length <= 1 || id.startsWith('preset-') || id === 'blank-1') return;
+    setLocalAnimations((prev) => prev.filter((a) => a.id !== id));
+    onDeleteCloudAnimation?.(id);
     const filtered = animations.filter((a) => a.id !== id);
-    setAnimations(filtered);
     if (selectedAnimId === id && filtered[0]) {
       setSelectedAnimId(filtered[0].id);
       setSelectedFrameIndex(0);
+      onChangeConfig({
+        ...config,
+        activeAnimationId: filtered[0].id,
+        currentGifUrl: filtered[0].frames[0]?.dataUrl || config.currentGifUrl,
+      });
     }
   };
 
@@ -278,18 +362,16 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
     };
     const nextFrames = [...currentFrames];
     nextFrames.splice(selectedFrameIndex + 1, 0, copy);
-    setAnimations((prev) =>
-      prev.map((a) => (a.id === currentAnim.id ? { ...a, frames: nextFrames } : a))
-    );
+    const updatedAnim: ScreenAnimation = { ...currentAnim, frames: nextFrames };
+    persistAnimationUpdate(updatedAnim);
     setSelectedFrameIndex(selectedFrameIndex + 1);
   };
 
   const handleDeleteFrame = () => {
     if (!currentAnim || currentFrames.length <= 1) return;
     const nextFrames = currentFrames.filter((_, idx) => idx !== selectedFrameIndex);
-    setAnimations((prev) =>
-      prev.map((a) => (a.id === currentAnim.id ? { ...a, frames: nextFrames } : a))
-    );
+    const updatedAnim: ScreenAnimation = { ...currentAnim, frames: nextFrames };
+    persistAnimationUpdate(updatedAnim);
     setSelectedFrameIndex(Math.max(0, selectedFrameIndex - 1));
   };
 
@@ -297,9 +379,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
     if (!currentAnim) return;
     const clamped = Math.max(20, Math.min(500, delayMs || 40));
     const nextFrames = currentFrames.map((f, i) => (i === idx ? { ...f, delayMs: clamped } : f));
-    setAnimations((prev) =>
-      prev.map((a) => (a.id === currentAnim.id ? { ...a, frames: nextFrames } : a))
-    );
+    persistAnimationUpdate({ ...currentAnim, frames: nextFrames });
   };
 
   const handleApplyAllFrameDelay = (fps: number) => {
@@ -307,9 +387,7 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
     if (!currentAnim) return;
     const delayMs = Math.max(20, Math.round(1000 / fps));
     const nextFrames = currentFrames.map((f) => ({ ...f, delayMs }));
-    setAnimations((prev) =>
-      prev.map((a) => (a.id === currentAnim.id ? { ...a, frames: nextFrames } : a))
-    );
+    persistAnimationUpdate({ ...currentAnim, frames: nextFrames });
   };
 
   // Interactive Pixel / Brush Drawing on the tftWidth x tftHeight canvas in Editing Mode
@@ -339,18 +417,23 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
     ctx.fill();
 
     const updatedUrl = canvas.toDataURL('image/png');
-    setAnimations((prev) =>
-      prev.map((a) =>
-        a.id === currentAnim.id
-          ? {
-              ...a,
-              frames: a.frames.map((f, i) =>
-                i === selectedFrameIndex ? { ...f, dataUrl: updatedUrl } : f
-              ),
-            }
-          : a
-      )
-    );
+    const updatedAnim: ScreenAnimation = {
+      ...currentAnim,
+      frames: currentAnim.frames.map((f, i) =>
+        i === selectedFrameIndex ? { ...f, dataUrl: updatedUrl } : f
+      ),
+    };
+    pendingEditedAnimRef.current = updatedAnim;
+    persistAnimationUpdate(updatedAnim, false);
+  };
+
+  const flushPendingBrushEdit = () => {
+    isDrawingRef.current = false;
+    if (pendingEditedAnimRef.current) {
+      const animToSync = pendingEditedAnimRef.current;
+      pendingEditedAnimRef.current = null;
+      persistAnimationUpdate(animToSync, true);
+    }
   };
 
   // Permanently bake overlayText onto the selected frame
@@ -381,18 +464,13 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
     ctx.fillText(overlayText, tftWidth / 2, textY);
 
     const updatedUrl = canvas.toDataURL('image/png');
-    setAnimations((prev) =>
-      prev.map((a) =>
-        a.id === currentAnim.id
-          ? {
-              ...a,
-              frames: a.frames.map((f, i) =>
-                i === selectedFrameIndex ? { ...f, dataUrl: updatedUrl } : f
-              ),
-            }
-          : a
-      )
-    );
+    const updatedAnim: ScreenAnimation = {
+      ...currentAnim,
+      frames: currentAnim.frames.map((f, i) =>
+        i === selectedFrameIndex ? { ...f, dataUrl: updatedUrl } : f
+      ),
+    };
+    persistAnimationUpdate(updatedAnim, true);
     setOverlayText('');
     onNotify?.('Đã ghi chữ vào khung hình đang chọn!');
   };
@@ -480,15 +558,25 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
     setUploadError(null);
     setMissingScreenPrompt(false);
 
-    if (!webhidService.isConnected()) {
-      const msg = `Chưa kết nối bàn phím ${deviceName} qua WebHID thật! Hãy cắm cáp USB-C và kết nối trước khi nạp ảnh/GIF.`;
-      setUploadError(msg);
-      onNotify?.(msg);
+    if (currentFrames.length === 0 || !currentAnim) {
+      setUploadError('Chưa có khung hình nào để nạp.');
       return;
     }
 
-    if (currentFrames.length === 0) {
-      setUploadError('Chưa có khung hình nào để nạp.');
+    if (!webhidService.isConnected()) {
+      if (onRemoteUploadScreen) {
+        setIsUploading(true);
+        setUploadStatusMsg('Đang gửi ảnh/GIF qua Firebase để máy tính nạp xuống bàn phím...');
+        try {
+          await onRemoteUploadScreen(currentAnim);
+        } finally {
+          setIsUploading(false);
+        }
+        return;
+      }
+      const msg = `Chưa kết nối bàn phím ${deviceName} qua WebHID thật! Hãy cắm cáp USB-C và kết nối hoặc đăng nhập Google.`;
+      setUploadError(msg);
+      onNotify?.(msg);
       return;
     }
 
@@ -672,6 +760,11 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
                     setSelectedAnimId(anim.id);
                     setSelectedFrameIndex(0);
                     setPlayIndex(0);
+                    onChangeConfig({
+                      ...config,
+                      activeAnimationId: anim.id,
+                      currentGifUrl: anim.frames[0]?.dataUrl || config.currentGifUrl,
+                    });
                   }}
                   className={`relative rounded-xl border overflow-hidden cursor-pointer transition bg-slate-950 ${
                     isSelected
@@ -725,7 +818,12 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
             </label>
             <button
               onClick={() => currentAnim && handleDeleteAnimation(currentAnim.id)}
-              disabled={animations.length <= 1}
+              disabled={
+                animations.length <= 1 ||
+                !currentAnim ||
+                currentAnim.id.startsWith('preset-') ||
+                currentAnim.id === 'blank-1'
+              }
               className="py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-rose-950 text-slate-300 hover:text-rose-400 text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-40 cursor-pointer"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -807,12 +905,8 @@ export const ScreenTab: React.FC<ScreenTabProps> = ({
                     paintAtClientCoords(e.clientX, e.clientY);
                   }
                 }}
-                onMouseUp={() => {
-                  isDrawingRef.current = false;
-                }}
-                onMouseLeave={() => {
-                  isDrawingRef.current = false;
-                }}
+                onMouseUp={flushPendingBrushEdit}
+                onMouseLeave={flushPendingBrushEdit}
                 className={`relative rounded-lg bg-black border border-slate-700 overflow-hidden flex items-center justify-center select-none ${
                   isLandscape ? 'w-[312px] h-[175px]' : 'w-[162px] h-[288px]'
                 } ${viewMode === 'editing' ? 'cursor-crosshair' : ''}`}

@@ -26,7 +26,9 @@ import {
   LightingConfig,
   Macro,
   MouseConfig,
+  ScreenAnimation,
   ScreenConfig,
+  ScreenFrame,
   SystemSettings,
 } from '../types/device';
 
@@ -95,6 +97,7 @@ export interface CloudScreenSettings {
   showTimeOverlay: boolean;
   showBatteryOverlay: boolean;
   showTempOverlay: boolean;
+  activeAnimationId?: string;
 }
 
 export interface CloudDeviceProfile {
@@ -160,7 +163,7 @@ function normalizeKeymapsFromCloud(
 }
 
 export function extractCloudScreenSettings(screen: ScreenConfig): CloudScreenSettings {
-  return {
+  const out: CloudScreenSettings = {
     brightness: Number(screen.brightness) || 90,
     fps: Number(screen.fps) || 25,
     orientation: screen.orientation ?? 0,
@@ -168,6 +171,10 @@ export function extractCloudScreenSettings(screen: ScreenConfig): CloudScreenSet
     showBatteryOverlay: Boolean(screen.showBatteryOverlay),
     showTempOverlay: Boolean(screen.showTempOverlay),
   };
+  if (screen.activeAnimationId && screen.activeAnimationId.trim()) {
+    out.activeAnimationId = sanitizeId(screen.activeAnimationId, 128);
+  }
+  return out;
 }
 
 export async function signInWithGoogle(): Promise<User> {
@@ -647,6 +654,7 @@ export type RemoteCommandType =
   | 'apply_system'
   | 'apply_mouse'
   | 'sync_time'
+  | 'upload_screen'
   | 'reset_keys'
   | 'factory_reset';
 
@@ -657,6 +665,7 @@ export interface RemoteCommandRecord {
   deviceId: string;
   profileSlot: number;
   layer?: number;
+  animId?: string;
   status: 'pending' | 'completed' | 'failed';
   resultMessage?: string;
   createdAtMs?: number;
@@ -670,6 +679,7 @@ export async function dispatchRemoteCommand(
     deviceId: string;
     profileSlot: number;
     layer?: number;
+    animId?: string;
   }
 ): Promise<string> {
   const commandId = sanitizeId(`cmd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, 128);
@@ -680,10 +690,13 @@ export async function dispatchRemoteCommand(
     typeof params.layer === 'number'
       ? Math.max(0, Math.min(3, Math.round(params.layer)))
       : undefined;
+  const cleanAnimId =
+    params.animId && params.animId.trim() ? sanitizeId(params.animId, 128) : undefined;
 
   try {
     const optionalFields = stripUndefined({
       layer: cleanLayer,
+      animId: cleanAnimId,
     });
     await setDoc(ref, {
       ownerId: uid,
@@ -722,6 +735,7 @@ export function subscribeRemoteCommands(
           deviceId: typeof data.deviceId === 'string' ? data.deviceId : 'aula-s75-pro',
           profileSlot: typeof data.profileSlot === 'number' ? data.profileSlot : 1,
           layer: typeof data.layer === 'number' ? data.layer : undefined,
+          animId: typeof data.animId === 'string' ? data.animId : undefined,
           status:
             data.status === 'completed' || data.status === 'failed'
               ? data.status
@@ -768,3 +782,222 @@ export async function cleanupRemoteCommand(uid: string, commandId: string): Prom
     handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
+
+function estimateFramesPayloadBytes(frames: ScreenFrame[]): number {
+  return frames.reduce((sum, f) => sum + (f.dataUrl?.length || 0) + (f.id?.length || 0) + 32, 0);
+}
+
+async function reencodeDataUrl(
+  dataUrl: string,
+  width: number,
+  height: number,
+  quality: number
+): Promise<string> {
+  if (typeof document === 'undefined') return dataUrl;
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = reject;
+    el.src = dataUrl;
+  });
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return dataUrl;
+  ctx.drawImage(img, 0, 0, width, height);
+  const webp = canvas.toDataURL('image/webp', quality);
+  if (webp.startsWith('data:image/webp')) {
+    return webp;
+  }
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
+export async function compactFramesForCloud(
+  frames: ScreenFrame[],
+  width: number,
+  height: number
+): Promise<ScreenFrame[]> {
+  const safeFrames: ScreenFrame[] = (frames || []).slice(0, 141).map((f, idx) => ({
+    id: sanitizeId(f.id || `f-${idx}`, 96),
+    dataUrl: f.dataUrl,
+    delayMs: Math.max(20, Math.min(500, Math.round(f.delayMs || 40))),
+  }));
+
+  if (safeFrames.length === 0) return [];
+  const MAX_CLOUD_BYTES = 720_000;
+  if (estimateFramesPayloadBytes(safeFrames) <= MAX_CLOUD_BYTES) {
+    return safeFrames;
+  }
+
+  let compressed = await Promise.all(
+    safeFrames.map(async (f) => ({
+      ...f,
+      dataUrl: await reencodeDataUrl(f.dataUrl, width, height, 0.8),
+    }))
+  );
+  if (estimateFramesPayloadBytes(compressed) <= MAX_CLOUD_BYTES) {
+    return compressed;
+  }
+
+  compressed = await Promise.all(
+    compressed.map(async (f) => ({
+      ...f,
+      dataUrl: await reencodeDataUrl(f.dataUrl, width, height, 0.6),
+    }))
+  );
+  if (estimateFramesPayloadBytes(compressed) <= MAX_CLOUD_BYTES) {
+    return compressed;
+  }
+
+  // Downsample frames evenly if GIF still exceeds Firestore 1MB safety threshold
+  const avgBytes = Math.max(1024, Math.ceil(estimateFramesPayloadBytes(compressed) / compressed.length));
+  const targetCount = Math.max(1, Math.min(compressed.length, Math.floor(MAX_CLOUD_BYTES / avgBytes)));
+  const step = compressed.length / targetCount;
+  const sampled: ScreenFrame[] = [];
+  for (let i = 0; i < targetCount; i++) {
+    const srcIdx = Math.min(compressed.length - 1, Math.floor(i * step));
+    const item = compressed[srcIdx];
+    sampled.push({
+      ...item,
+      delayMs: Math.max(20, Math.min(500, Math.round(item.delayMs * step))),
+    });
+  }
+  return sampled;
+}
+
+function mapCloudAnimationDoc(id: string, data: Record<string, any>): ScreenAnimation | null {
+  const rawFrames = Array.isArray(data.frames) ? data.frames : [];
+  const frames: ScreenFrame[] = rawFrames
+    .filter((f: any) => f && typeof f.dataUrl === 'string')
+    .map((f: any, idx: number) => ({
+      id: typeof f.id === 'string' ? f.id : `f-${idx}`,
+      dataUrl: f.dataUrl,
+      delayMs: typeof f.delayMs === 'number' ? f.delayMs : 40,
+    }));
+  if (frames.length === 0) return null;
+  return {
+    id,
+    name: typeof data.name === 'string' ? data.name : 'Custom',
+    width: typeof data.width === 'number' ? data.width : undefined,
+    height: typeof data.height === 'number' ? data.height : undefined,
+    frames,
+    createdAt: typeof data.clientCreatedAt === 'number' ? data.clientCreatedAt : Date.now(),
+  };
+}
+
+export async function saveScreenAnimationToCloud(
+  uid: string,
+  anim: ScreenAnimation,
+  width: number,
+  height: number
+): Promise<ScreenAnimation> {
+  const safeId = sanitizeId(anim.id, 128);
+  const safeName = (anim.name || 'Custom').trim().slice(0, 100) || 'Custom';
+  const safeW = Math.max(32, Math.min(640, Math.round(anim.width || width || 135)));
+  const safeH = Math.max(32, Math.min(640, Math.round(anim.height || height || 240)));
+  const compactedFrames = await compactFramesForCloud(anim.frames, safeW, safeH);
+  const clientCreatedAt =
+    typeof anim.createdAt === 'number' ? anim.createdAt : Date.now();
+
+  const path = `users/${uid}/screenAnimations/${safeId}`;
+  const ref = doc(db, 'users', uid, 'screenAnimations', safeId);
+
+  try {
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      await setDoc(ref, {
+        ownerId: uid,
+        animId: safeId,
+        name: safeName,
+        width: safeW,
+        height: safeH,
+        frames: compactedFrames,
+        clientCreatedAt,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await updateDoc(ref, {
+        name: safeName,
+        width: safeW,
+        height: safeH,
+        frames: compactedFrames,
+        clientCreatedAt,
+        updatedAt: serverTimestamp(),
+      });
+    }
+    return {
+      id: safeId,
+      name: safeName,
+      width: safeW,
+      height: safeH,
+      frames: compactedFrames,
+      createdAt: clientCreatedAt,
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteScreenAnimationFromCloud(
+  uid: string,
+  animId: string
+): Promise<void> {
+  const safeId = sanitizeId(animId, 128);
+  const path = `users/${uid}/screenAnimations/${safeId}`;
+  try {
+    await deleteDoc(doc(db, 'users', uid, 'screenAnimations', safeId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function loadUserScreenAnimationsFromCloud(
+  uid: string
+): Promise<ScreenAnimation[]> {
+  const path = `users/${uid}/screenAnimations`;
+  try {
+    const q = query(
+      collection(db, 'users', uid, 'screenAnimations'),
+      where('ownerId', '==', uid)
+    );
+    const snap = await getDocs(q);
+    const items: ScreenAnimation[] = [];
+    for (const d of snap.docs) {
+      const mapped = mapCloudAnimationDoc(d.id, d.data());
+      if (mapped) items.push(mapped);
+    }
+    items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    return items;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+  }
+}
+
+export function subscribeUserScreenAnimations(
+  uid: string,
+  onData: (anims: ScreenAnimation[]) => void
+): Unsubscribe {
+  const path = `users/${uid}/screenAnimations`;
+  const q = query(
+    collection(db, 'users', uid, 'screenAnimations'),
+    where('ownerId', '==', uid)
+  );
+  return onSnapshot(
+    q,
+    (snap) => {
+      const items: ScreenAnimation[] = [];
+      for (const d of snap.docs) {
+        const mapped = mapCloudAnimationDoc(d.id, d.data());
+        if (mapped) items.push(mapped);
+      }
+      items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      onData(items);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  );
+}
+
