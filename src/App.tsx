@@ -51,6 +51,7 @@ import {
   AULA_TFT_HEIGHT,
 } from './services/gifEncoder';
 import { soundEngine } from './services/soundEngine';
+import { OfflineIndicator } from './components/OfflineIndicator';
 import { auth } from './firebase';
 import {
   signInWithGoogle,
@@ -2381,6 +2382,8 @@ export default function App() {
           })}
         </div>
       </nav>
+      {/* Offline Connectivity Banner */}
+      <OfflineIndicator lang={lang} />
     </div>
   );
 }

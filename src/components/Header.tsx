@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { DeviceModel, Language } from '../types/device';
 import { ConnectedDeviceInfo } from '../services/webhid';
+import { PWAInstallButton } from './PWAInstallButton';
 
 export interface AuthUserSummary {
   uid: string;
@@ -132,6 +133,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Mobile Compact Quick Actions (Visible < md) */}
         <div className="flex md:hidden items-center gap-1.5 shrink-0">
+          <PWAInstallButton lang={lang} compact />
           {user ? (
             <button
               onClick={() => setShowMobileMenu((v) => !v)}
@@ -296,6 +298,8 @@ export const Header: React.FC<HeaderProps> = ({
               <Languages className="w-3.5 h-3.5 text-cyan-400" />
               <span>{lang.toUpperCase()}</span>
             </button>
+
+            <PWAInstallButton lang={lang} />
           </div>
 
           {/* Google Account & Firebase Cloud Sync */}
@@ -479,6 +483,8 @@ export const Header: React.FC<HeaderProps> = ({
               <span>{t('importProfile')}</span>
             </button>
           </div>
+
+          <PWAInstallButton lang={lang} fullWidth />
 
           <div className="flex items-center gap-2">
             <button

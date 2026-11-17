@@ -65,6 +65,7 @@ export interface LightingConfig {
 export type KeyActionType =
   | 'default'
   | 'key'
+  | 'combo'
   | 'modifier'
   | 'media'
   | 'mouse'
@@ -76,6 +77,7 @@ export type KeyActionType =
 export interface KeyRemapAction {
   type: KeyActionType;
   value: string; // target keycode or action identifier
+  mods?: number; // USB HID modifier bitmask (1=LCtrl, 2=LShift, 4=LAlt, 8=LWin/Cmd)
   label: string;
   category: string;
 }

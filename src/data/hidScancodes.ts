@@ -74,7 +74,11 @@ export const MOUSE_ACTION_CODES: Record<string, number> = {
 
 // Standard 32-bit AULA/EVVision key entry encoding:
 // [typeByte, modifierByte, hidUsageLo, hidUsageHi]
-export function encodeAulaKeyAction(type: string, value: string): [number, number, number, number] {
+export function encodeAulaKeyAction(
+  type: string,
+  value: string,
+  mods = 0
+): [number, number, number, number] {
   if (type === 'disabled') {
     return [0x00, 0x00, 0x00, 0x00];
   }
@@ -98,10 +102,13 @@ export function encodeAulaKeyAction(type: string, value: string): [number, numbe
     return [0x06, 0x00, rgbMap[value] ?? 0x01, 0x00];
   }
   const usage = USB_HID_SCANCODES[value] ?? 0x00;
+  if (type === 'combo') {
+    return [0x02, mods & 0xff, usage & 0xff, 0x00];
+  }
   // Modifiers (0xE0..0xE7)
   if (usage >= 0xe0 && usage <= 0xe7) {
     const modBit = 1 << (usage - 0xe0);
     return [0x01, modBit, 0x00, 0x00];
   }
-  return [0x02, 0x00, usage, 0x00];
+  return [0x02, mods & 0xff, usage, 0x00];
 }

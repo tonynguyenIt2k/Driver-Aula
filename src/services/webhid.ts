@@ -614,10 +614,10 @@ class WebHIDService {
   private convertKeyActionToOpenAula(action: KeyRemapAction | undefined, macros: Macro[]): any {
     if (!action || action.type === 'default') return undefined;
     if (action.type === 'disabled') return { type: 'disable' };
-    if (action.type === 'key' || action.type === 'modifier') {
+    if (action.type === 'key' || action.type === 'modifier' || action.type === 'combo') {
       const code = USB_HID_SCANCODES[action.value];
       if (code === undefined) return undefined;
-      return { type: 'key', code, mods: 0 };
+      return { type: 'key', code, mods: (action.mods ?? 0) & 0xff };
     }
     if (action.type === 'media') {
       const usage = USB_CONSUMER_CODES[action.value];

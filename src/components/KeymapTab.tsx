@@ -11,6 +11,7 @@ import {
   Keyboard,
   ArrowRight,
   X,
+  Zap,
 } from 'lucide-react';
 import { KeyDefinition, KeyRemapAction, Macro, Language } from '../types/device';
 import { USB_HID_SCANCODES } from '../data/hidScancodes';
@@ -44,34 +45,101 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
 }) => {
   const [activeCategory, setActiveCategory] = useState<string>('standard');
   const [isCapturingKey, setIsCapturingKey] = useState<boolean>(false);
+  const [comboMods, setComboMods] = useState<number>(1); // 1=Ctrl, 2=Shift, 4=Alt, 8=Win/Cmd
+  const [comboKey, setComboKey] = useState<string>('KeyC');
+
+  const formatComboLabel = (modsMask: number, keyLabel: string) => {
+    const parts: string[] = [];
+    if (modsMask & 1) parts.push('Ctrl');
+    if (modsMask & 2) parts.push('Shift');
+    if (modsMask & 4) parts.push('Alt');
+    if (modsMask & 8) parts.push('Win');
+    parts.push(keyLabel);
+    return parts.join(' + ');
+  };
 
   useEffect(() => {
     if (!isCapturingKey || !selectedKey) return;
+    let pendingModCode: string | null = null;
+    let pendingModLabel = '';
+
     const onKeyDown = (e: KeyboardEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      setIsCapturingKey(false);
       const hid = USB_HID_SCANCODES[e.code];
       if (hid === undefined) return;
       const niceLabel =
         e.key.length === 1 ? e.key.toUpperCase() : e.code.replace('Key', '').replace('Digit', '');
-      const isFRow = /^F([1-9]|1[0-9]|2[0-4])$/.test(e.code);
       const isMod = hid >= 0xe0;
+
+      if (isMod) {
+        pendingModCode = e.code;
+        pendingModLabel = niceLabel;
+        return;
+      }
+
+      pendingModCode = null;
+      setIsCapturingKey(false);
+
+      const modsMask =
+        (e.ctrlKey ? 1 : 0) |
+        (e.shiftKey ? 2 : 0) |
+        (e.altKey ? 4 : 0) |
+        (e.metaKey ? 8 : 0);
+
+      if (modsMask > 0) {
+        onRemap({
+          type: 'combo',
+          value: e.code,
+          mods: modsMask,
+          label: formatComboLabel(modsMask, niceLabel),
+          category: 'Combo',
+        });
+        return;
+      }
+
+      const isFRow = /^F([1-9]|1[0-2])$/.test(e.code);
       onRemap({
-        type: isMod ? 'modifier' : 'key',
+        type: 'key',
         value: e.code,
         label: niceLabel,
-        category: isFRow ? 'F-Row' : isMod ? 'Modifier' : 'Standard',
+        category: isFRow ? 'F-Row' : 'Standard',
       });
     };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (pendingModCode && e.code === pendingModCode) {
+        e.preventDefault();
+        e.stopPropagation();
+        const code = pendingModCode;
+        const label = pendingModLabel;
+        pendingModCode = null;
+        setIsCapturingKey(false);
+        onRemap({
+          type: 'modifier',
+          value: code,
+          label,
+          category: 'Modifier',
+        });
+      }
+    };
+
     window.addEventListener('keydown', onKeyDown, true);
-    return () => window.removeEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+    };
   }, [isCapturingKey, selectedKey, onRemap]);
 
   // Auto-switch category tab to match the already-assigned target when clicking a remapped key
   useEffect(() => {
     if (!currentAction) return;
-    if (currentAction.category === 'F-Row' || /^F([1-9]|1[0-9]|2[0-4])$/.test(currentAction.value)) {
+    if (currentAction.type === 'combo') {
+      setActiveCategory('combo');
+      if (typeof currentAction.mods === 'number') setComboMods(currentAction.mods);
+      if (currentAction.value) setComboKey(currentAction.value);
+    } else if (currentAction.category === 'F-Row' || /^F([1-9]|1[0-2])$/.test(currentAction.value)) {
       setActiveCategory('fkeys');
     } else if (currentAction.type === 'modifier') {
       setActiveCategory('modifiers');
@@ -100,13 +168,13 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
       Boolean(entry.keyDef)
     );
 
-  const fRowKeys = Array.from({ length: 24 }, (_, i) => ({
+  const fRowKeys = Array.from({ length: 12 }, (_, i) => ({
     label: `F${i + 1}`,
     value: `F${i + 1}`,
   }));
 
   const standardKeys = [
-    ...fRowKeys.slice(0, 12),
+    ...fRowKeys,
     { label: 'A', value: 'KeyA' }, { label: 'B', value: 'KeyB' }, { label: 'C', value: 'KeyC' },
     { label: 'D', value: 'KeyD' }, { label: 'E', value: 'KeyE' }, { label: 'F', value: 'KeyF' },
     { label: 'G', value: 'KeyG' }, { label: 'H', value: 'KeyH' }, { label: 'I', value: 'KeyI' },
@@ -176,9 +244,45 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
     { label: 'Toggle RGB On/Off', value: 'RGB_TOGGLE' },
   ];
 
+  const comboBaseKeys = [
+    ...standardKeys,
+    { label: 'Space', value: 'Space' },
+    { label: 'Enter', value: 'Enter' },
+    { label: 'Tab', value: 'Tab' },
+    { label: 'Esc', value: 'Escape' },
+    { label: 'Backspace', value: 'Backspace' },
+    { label: 'Delete', value: 'Delete' },
+    { label: 'Insert', value: 'Insert' },
+    { label: 'Home', value: 'Home' },
+    { label: 'End', value: 'End' },
+    { label: 'PageUp', value: 'PageUp' },
+    { label: 'PageDown', value: 'PageDown' },
+    { label: '↑ Up', value: 'ArrowUp' },
+    { label: '↓ Down', value: 'ArrowDown' },
+    { label: '← Left', value: 'ArrowLeft' },
+    { label: '→ Right', value: 'ArrowRight' },
+    { label: 'PrintScreen', value: 'PrintScreen' },
+  ];
+
+  const comboPresets: { label: string; mods: number; value: string; hint: string }[] = [
+    { label: 'Ctrl + C', mods: 1, value: 'KeyC', hint: 'Copy' },
+    { label: 'Ctrl + V', mods: 1, value: 'KeyV', hint: 'Paste' },
+    { label: 'Ctrl + X', mods: 1, value: 'KeyX', hint: 'Cut' },
+    { label: 'Ctrl + Z', mods: 1, value: 'KeyZ', hint: 'Undo' },
+    { label: 'Ctrl + Y', mods: 1, value: 'KeyY', hint: 'Redo' },
+    { label: 'Ctrl + A', mods: 1, value: 'KeyA', hint: 'Select All' },
+    { label: 'Ctrl + S', mods: 1, value: 'KeyS', hint: 'Save' },
+    { label: 'Alt + Tab', mods: 4, value: 'Tab', hint: 'Đổi cửa sổ' },
+    { label: 'Alt + F4', mods: 4, value: 'F4', hint: 'Đóng app' },
+    { label: 'Win + D', mods: 8, value: 'KeyD', hint: 'Desktop' },
+    { label: 'Win + Shift + S', mods: 10, value: 'KeyS', hint: 'Chụp màn hình' },
+    { label: 'Ctrl + Shift + Esc', mods: 3, value: 'Escape', hint: 'Task Manager' },
+  ];
+
   const categories = [
     { id: 'standard', name: t('categoryStandard'), icon: Command },
-    { id: 'fkeys', name: lang === 'vi' ? 'Hàng F (F1–F24)' : 'F-Row (F1–F24)', icon: Keyboard },
+    { id: 'combo', name: lang === 'vi' ? 'Tổ hợp phím' : 'Shortcuts', icon: Zap },
+    { id: 'fkeys', name: lang === 'vi' ? 'Hàng F (F1–F12)' : 'F-Row (F1–F12)', icon: Keyboard },
     { id: 'modifiers', name: t('categoryModifiers'), icon: Settings },
     { id: 'media', name: t('categoryMedia'), icon: Music },
     { id: 'mouse', name: t('categoryMouse'), icon: Mouse },
@@ -414,6 +518,137 @@ export const KeymapTab: React.FC<KeymapTabProps> = ({
                   </button>
                 );
               })}
+            </div>
+          )}
+
+          {activeCategory === 'combo' && (
+            <div className="flex flex-col gap-4">
+              {/* Custom Combo Builder */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 sm:p-4 flex flex-col gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-cyan-300">
+                    {lang === 'vi'
+                      ? 'Tạo tổ hợp tùy ý (Chọn phím giữ + 1 phím chính)'
+                      : 'Custom Shortcut Builder'}
+                  </span>
+                  <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-700">
+                    {comboMods > 0
+                      ? formatComboLabel(
+                          comboMods,
+                          comboBaseKeys.find((k) => k.value === comboKey)?.label || comboKey
+                        )
+                      : comboBaseKeys.find((k) => k.value === comboKey)?.label || comboKey}
+                  </span>
+                </div>
+
+                {/* Modifier Toggles */}
+                <div className="grid grid-cols-4 gap-2">
+                  {[
+                    { bit: 1, label: 'Ctrl' },
+                    { bit: 2, label: 'Shift' },
+                    { bit: 4, label: 'Alt' },
+                    { bit: 8, label: 'Win / Cmd' },
+                  ].map((mod) => {
+                    const active = (comboMods & mod.bit) !== 0;
+                    return (
+                      <button
+                        key={mod.bit}
+                        type="button"
+                        onClick={() => setComboMods((prev) => prev ^ mod.bit)}
+                        className={`min-h-[42px] px-2 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer ${
+                          active
+                            ? 'bg-cyan-500 text-slate-950 border-cyan-400 shadow-sm'
+                            : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:border-slate-500'
+                        }`}
+                      >
+                        {mod.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Base Key Select + Apply Button */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <select
+                    value={comboKey}
+                    onChange={(e) => setComboKey(e.target.value)}
+                    className="flex-1 min-h-[42px] bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs font-bold text-slate-100 focus:outline-none focus:border-cyan-500"
+                  >
+                    {comboBaseKeys.map((k) => (
+                      <option key={k.value} value={k.value}>
+                        Phím chính: {k.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <button
+                    type="button"
+                    disabled={!selectedKey || comboMods === 0}
+                    onClick={() => {
+                      const keyLabel =
+                        comboBaseKeys.find((k) => k.value === comboKey)?.label || comboKey;
+                      onRemap({
+                        type: 'combo',
+                        value: comboKey,
+                        mods: comboMods,
+                        label: formatComboLabel(comboMods, keyLabel),
+                        category: 'Combo',
+                      });
+                    }}
+                    className="min-h-[42px] px-4 py-2 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-extrabold text-xs transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shrink-0"
+                  >
+                    {lang === 'vi' ? 'Gán tổ hợp này' : 'Assign Shortcut'}
+                  </button>
+                </div>
+                {comboMods === 0 && (
+                  <p className="text-[11px] text-amber-400">
+                    Hãy chọn ít nhất 1 phím giữ (Ctrl, Shift, Alt hoặc Win).
+                  </p>
+                )}
+              </div>
+
+              {/* Popular Quick Combo Presets */}
+              <div className="flex flex-col gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  {lang === 'vi' ? 'Tổ hợp phổ biến (1 chạm gán ngay)' : 'Quick Presets'}
+                </span>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                  {comboPresets.map((preset) => {
+                    const active =
+                      currentAction?.type === 'combo' &&
+                      currentAction?.value === preset.value &&
+                      (currentAction?.mods ?? 0) === preset.mods;
+                    return (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        disabled={!selectedKey}
+                        onClick={() =>
+                          onRemap({
+                            type: 'combo',
+                            value: preset.value,
+                            mods: preset.mods,
+                            label: preset.label,
+                            category: 'Combo',
+                          })
+                        }
+                        className={`min-h-[48px] min-w-0 p-2.5 rounded-lg border text-left transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex flex-col justify-center ${
+                          active
+                            ? 'bg-amber-500/25 border-amber-400 text-amber-200 ring-1 ring-amber-400'
+                            : 'bg-slate-800/80 hover:bg-cyan-600/30 hover:border-cyan-500 border-slate-700/80 text-slate-200'
+                        }`}
+                      >
+                        <span className="text-xs font-bold font-mono truncate">
+                          {preset.label}
+                        </span>
+                        <span className="text-[10px] text-slate-400 truncate">
+                          {preset.hint}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
 
